@@ -15,3 +15,13 @@ test('business suffixes are removed from wildcard and comparison keys', () => {
   assert.equal(plan.find(q=>q.type==='address-zip').fields.address,'20*oak*');
   assert.equal(plan.find(q=>q.type==='banner-wildcard-zip').fields.banner,'acme*');
 });
+
+test('consolidation preserves each record status and fills missing status from later searches', () => {
+ const results=engine.consolidateCandidates({bannerName:'Acme'},[
+  {candidate:{slId:'A',bannerName:'Acme'}},
+  {candidate:{slId:'B',bannerName:'Acme',storeStatus:'Closed'}},
+  {candidate:{slId:'A',bannerName:'Acme',storeStatus:'Open'}}
+ ]);
+ assert.equal(results.find(x=>x.candidate.slId==='A').candidate.storeStatus,'Open');
+ assert.equal(results.find(x=>x.candidate.slId==='B').candidate.storeStatus,'Closed');
+});

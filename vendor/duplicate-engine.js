@@ -132,6 +132,7 @@
       const existingFields = new Map((current.candidate.copyFields || []).map(item => [item.header, item]));
       (candidate.copyFields || []).forEach(item => { if (item?.header && item.value && !existingFields.has(item.header)) existingFields.set(item.header, item); });
       current.candidate.copyFields = [...existingFields.values()];
+      if (!cleanText(current.candidate.storeStatus) && cleanText(candidate.storeStatus)) current.candidate.storeStatus = candidate.storeStatus;
       if (judged.directMatch || judged.score > current.score) Object.assign(current,{classification:judged.classification,directMatch:judged.directMatch,directReason:judged.directReason,score:judged.score,scorePercent:judged.scorePercent,fieldMatches:judged.fieldMatches});
       current.matchedRules = [...new Set([...current.matchedRules, ...judged.rules])];
       current.queries = [...new Set([...current.queries, observation.queryId].filter(Boolean))];
