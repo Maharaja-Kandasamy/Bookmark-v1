@@ -27,6 +27,8 @@ test('bookmark build is self-contained and excludes extension-only functionality
   const bookmark = fs.readFileSync(path.join(repo, 'picker-bookmark-v1.min.js'), 'utf8');
   assert.doesNotThrow(() => new Function(readable));
   assert.ok(bookmark.startsWith('javascript:'));
+  const payload = decodeURIComponent(bookmark.slice('javascript:'.length));
+  assert.doesNotThrow(() => new Function(payload), 'The installed bookmark payload must parse, including line comments');
   assert.doesNotMatch(readable, /chrome\.|pickerLookup|latestGoogleBusiness|Live Google Search/);
   assert.match(readable, /PickerBookmarkV1/);
 });

@@ -78,3 +78,21 @@ test('relaunch disposes the previous instance and reads a fresh source', () => {
   assert.equal(kills,1);
   assert.notEqual(win.__pickerBookmarkV1,previous);
 });
+
+test('missing source still opens UI and leaves refresh monitoring active', () => {
+  const vm = require('node:vm');
+  let opened=0,mounted=0,disposed=0;
+  const win={alert(){throw new Error('Must show diagnostic in the panel');}};
+  const context={window:win,document:{}};
+  context.globalThis={
+    PickerBookmarkLifecycle:{create:()=>({dispose(){disposed++;}})},
+    PickerBookmarkStore:{create:()=>({destroy(){disposed++;}})},
+    PickerBookmarkController:{create:()=>({scan:()=>({error:'source-table-not-found'}),refresh(){}})},
+    PickerBookmarkBot:{mount:()=>{mounted++;return {open(){opened++;},destroy(){}};}}
+  };
+  vm.runInNewContext(src('bookmark-entry.js'),context);
+  assert.equal(mounted,1);
+  assert.equal(opened,1);
+  assert.equal(disposed,0);
+  assert.ok(win.__pickerBookmarkV1);
+});

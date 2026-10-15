@@ -18,7 +18,7 @@ const inputs = [
 
 const banner = '/* Picker Bookmark v1 — self-contained GSRS duplicate assistant */';
 const readable = `${banner}\n${inputs.map(file => fs.readFileSync(path.join(root, file), 'utf8').trim()).join('\n')}\n`;
-const compact = readable.split(/\r?\n/).map(line => line.trim()).filter(Boolean).join(' ');
+const compact = readable.split(/\r?\n/).map(line => line.trim()).filter(Boolean).join('\n');
 const bookmarkUrl = `javascript:${encodeURIComponent(compact)}`;
 const template = fs.readFileSync(path.join(root, 'install.template.html'), 'utf8');
 const html = template.replaceAll('__BOOKMARK_URL__', bookmarkUrl).replaceAll('__BOOKMARK_KB__', (Buffer.byteLength(bookmarkUrl) / 1024).toFixed(1));
