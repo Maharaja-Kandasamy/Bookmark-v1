@@ -21,7 +21,7 @@ If dragging is restricted, use **Copy bookmark link**, create a normal bookmark,
 - AstroBot SVG robot with idle blinking, greeting wave, search thinking, completion celebration, paused blinking, drag dangling, and landing bounce.
 - Responsive panel placement, pointer tracking, and reduced-motion support.
 - Google Address Search and Map Address Search as normal outbound links.
-- Kill Bot cleanup and clean relaunch.
+- Kill Bot stops searches immediately, plays a single red overload and burst animation, then removes the robot. Reduced-motion users get immediate removal; relaunch safely replaces a departing robot.
 
 ## Intentionally excluded
 

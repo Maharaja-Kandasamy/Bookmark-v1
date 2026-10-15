@@ -17,7 +17,7 @@ test('bookmark robot contains required on-page controls without extension or Goo
 test('entry point enforces one instance and permits clean relaunch after kill', () => {
   const entry = src('bookmark-entry.js');
   assert.match(entry, /window\.__pickerBookmarkV1/);
-  assert.match(entry, /existing\.kill\(\)/);
+  assert.match(entry, /existing\.kill\(\{ immediate: true \}\)/);
   assert.match(entry, /delete window\.__pickerBookmarkV1/);
   assert.match(entry, /PickerBookmarkLifecycle\.create/);
   assert.match(entry, /PickerBookmarkController\.create/);
@@ -49,7 +49,7 @@ test('robot follows the restrained product visual system', () => {
   assert.match(ui, /https:\/\/www\.google\.com\/search\?q=\$\{encodeURIComponent\(query\)\}/);
   const rig = src('bookmark-robot.js');
   for (const part of ['astrobot-svg','bot-arm-left','bot-arm-right','bot-leg-left','bot-leg-right','bot-eyes-group','thinking-ring','celebrate-group']) assert.ok(rig.includes(part), part);
-  for (const motion of ['idle','blinking','waving','thinking','celebrating','dragging','landing']) assert.ok(rig.includes('state-'+motion), motion);
+  for (const motion of ['idle','blinking','waving','thinking','celebrating','dragging','landing','killing']) assert.ok(rig.includes('state-'+motion), motion);
   assert.match(ui, /pointercancel/);
   assert.match(ui, /lostpointercapture/);
   assert.match(rig, /prefers-reduced-motion/);

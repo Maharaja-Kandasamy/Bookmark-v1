@@ -48,10 +48,14 @@
     let suppressClick = false;
     let motionTimer = null;
     let previousStatus = null;
+    let killing = false;
+    let killed = false;
+    let killTimer = null;
     const robot = $('#astrobot-svg');
-    const motionStates = ['idle','blinking','waving','thinking','celebrating','dragging','landing'];
+    const motionStates = ['idle','blinking','waving','thinking','celebrating','dragging','landing','killing'];
     const restingMotion = () => ['running','waiting'].includes(state.status) ? 'thinking' : ['paused','error','incomplete'].includes(state.status) ? 'blinking' : 'idle';
     function animateRobot(name, duration = 0) {
+      if (killing && name !== 'killing') return;
       window.clearTimeout(motionTimer);
       robot.classList.remove(...motionStates.map(value => `state-${value}`));
       robot.classList.add(`state-${name}`);
@@ -93,11 +97,29 @@
       position();
     }
     const unsubscribe = store.subscribe(render); lifecycle.add(unsubscribe);
-    function openPanel() { open=true; panel.classList.add('open'); window.requestAnimationFrame(position); }
+    function openPanel() { if(killing)return; open=true; panel.classList.add('open'); window.requestAnimationFrame(position); }
     function closePanel() { open=false; panel.classList.remove('open'); }
-    function kill() {
+    function finishKill() {
+      if (killed) return;
+      killed = true;
+      window.clearTimeout(killTimer);
+      host.remove();
+      onKilled();
+    }
+    function kill({ immediate = false } = {}) {
+      if (killed) return;
+      if (killing) { if (immediate) finishKill(); return; }
+      killing = true;
+      drag = null;
       closePanel();
-      host.remove(); controller.destroy(); onKilled();
+      host.style.pointerEvents = 'none';
+      $('.bot').disabled = true;
+      animateRobot('killing');
+      // Stop searches, observers, listeners and idle timers immediately; keep only the visual farewell.
+      controller.destroy();
+      const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+      if (immediate || reducedMotion) finishKill();
+      else killTimer = window.setTimeout(finishKill, 1700);
     }
     lifecycle.listen(shadow, 'click', event => {
       const target=event.target.closest('button'); if(!target)return;
