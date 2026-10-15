@@ -17,7 +17,7 @@ test('bookmark robot contains required on-page controls without extension or Goo
 test('entry point enforces one instance and permits clean relaunch after kill', () => {
   const entry = src('bookmark-entry.js');
   assert.match(entry, /window\.__pickerBookmarkV1/);
-  assert.match(entry, /existing\.open\(\)/);
+  assert.match(entry, /existing\.kill\(\)/);
   assert.match(entry, /delete window\.__pickerBookmarkV1/);
   assert.match(entry, /PickerBookmarkLifecycle\.create/);
   assert.match(entry, /PickerBookmarkController\.create/);
@@ -25,7 +25,7 @@ test('entry point enforces one instance and permits clean relaunch after kill', 
   assert.doesNotMatch(entry, /chrome\./);
 });
 
-test('kill animation finishes with controller and lifecycle disposal', () => {
+test('kill immediately disposes controller and lifecycle', () => {
   const ui = src('bookmark-bot.js');
   assert.match(ui, /setAttribute\('data-state', 'exiting'\)/);
   assert.match(ui, /controller\.destroy\(\)/);
@@ -57,4 +57,24 @@ test('robot follows the restrained product visual system', () => {
   assert.match(ui, /shell\.released/);
   assert.match(ui, /pick-squeeze/);
   assert.match(ui, /pick-release/);
+});
+
+test('relaunch disposes the previous instance and reads a fresh source', () => {
+  const vm = require('node:vm');
+  let record='OLD', scans=0, kills=0;
+  const win={};
+  const context={window:win,document:{}};
+  context.globalThis={
+    PickerBookmarkLifecycle:{create:()=>({dispose(){}})},
+    PickerBookmarkStore:{create:()=>({destroy(){}})},
+    PickerBookmarkController:{create:()=>({scan(){scans++;return {source:{slId:record}};},refresh(){}})},
+    PickerBookmarkBot:{mount:({onKilled})=>({open(){},destroy(){kills++;onKilled();}})}
+  };
+  vm.runInNewContext(src('bookmark-entry.js'),context);
+  const previous=win.__pickerBookmarkV1;
+  record='NEW';
+  context.globalThis.PickerBookmarkV1.launch();
+  assert.equal(scans,2);
+  assert.equal(kills,1);
+  assert.notEqual(win.__pickerBookmarkV1,previous);
 });

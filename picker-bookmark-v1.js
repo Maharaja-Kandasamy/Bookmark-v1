@@ -19,6 +19,10 @@
     .filter(Boolean)
     .map(token => suffixes.get(token) || token).join(' ')
     .trim();
+  const addressNoise = new Set('street st road rd avenue ave av boulevard blvd drive dr lane ln highway hwy route rte court ct circle cir place pl terrace ter parkway pkwy way trail trl square sq expressway expy junction jct mount mt mountain mtn fort ft saint west w east e north n south s northeast ne northwest nw southeast se southwest sw'.split(' '));
+  const normalizeBanner = value => normalizeWords(value)
+    .replace(/\b(?:l\s+l\s+c|l\s+t\s+d|i\s+n\s+c)\b/g, ' ')
+    .split(' ').filter(word => word && !['limited','ltd','inc','incorporated','llc','llp','plc','corp','corporation','co','company'].includes(word)).join(' ');
   const digits = value => String(value || '').replace(/\D/g, '');
 
   function createZip3(value) {
@@ -30,8 +34,8 @@
   }
 
   function wildcardWords(value, kind) {
-    let words = (kind === 'address' ? normalizeAddress(value) : normalizeWords(value)).split(' ').filter(Boolean);
-    if (kind === 'address') words = words.filter(word => !['suite', 'ste', 'unit', 'apt'].includes(word));
+    let words = (kind === 'address' ? normalizeAddress(value) : kind === 'banner' ? normalizeBanner(value) : normalizeWords(value)).split(' ').filter(Boolean);
+    if (kind === 'address') words = words.filter(word => !addressNoise.has(word));
     return words.map((word, index) => {
       if (kind === 'address' && index === 0 && /^\d+$/.test(word)) return word;
       if (word.length <= 3) return word;
@@ -46,11 +50,12 @@
       ...raw,
       slId: cleanText(raw.slId),
       bannerName: cleanText(raw.bannerName),
-      bannerKey: normalizeWords(raw.bannerName),
+      bannerKey: normalizeBanner(raw.bannerName),
       address: cleanText(raw.address),
       addressKey: normalizeAddress(raw.address),
       city: cleanText(raw.city),
       cityKey: normalizeWords(raw.city),
+      stateKey: normalizeWords(raw.state),
       zip: cleanText(raw.zip),
       zip3: createZip3(raw.zip),
       storeNumber: cleanText(raw.storeNumber),
@@ -143,7 +148,7 @@
     return [['SL_ID',candidate?.slId],['SL_STORE_NAME',candidate?.bannerName],['SL_STORE_NUMBER',candidate?.storeNumber],['SL_PA_LINE1',candidate?.address],['SL_PA_CITY_NAME',candidate?.city],['SL_PA_STATE_CODE',candidate?.state],['SL_PA_POSTAL_CODE',candidate?.zip],['PHONE',candidate?.phone]].filter(([,v]) => cleanText(v)).map(([h,v]) => `${h}: ${cleanText(v)}`).join('\n');
   };
 
-  return { cleanText, normalizeWords, normalizeAddress, createZip3, wildcardWords, normalizeSource, createSearchPlan, consolidateCandidates, formatTdCopy, formatFullCopy };
+  return { cleanText, normalizeWords, normalizeBanner, normalizeAddress, createZip3, wildcardWords, normalizeSource, createSearchPlan, consolidateCandidates, formatTdCopy, formatFullCopy };
 });
 (function (root, factory) {
   const api = factory();
@@ -636,24 +641,56 @@
     let runner = null;
     let extraction = null;
     let destroyed = false;
+    let revision = 0;
+    const signature = found => JSON.stringify([found?.profile, found?.source || null]);
+    function invalidate() {
+      revision++;
+      runner?.cancel?.();
+      runner = null;
+    }
+    function refresh() {
+      if (destroyed) return;
+      let found = Gsrs.extractFromDocument(doc, 'storeView');
+      if (found?.error === 'profile-mismatch' || found?.detectedProfile === 'retailSync') found = Gsrs.extractFromDocument(doc, 'retailSync');
+      if (found?.error) {
+        if (extraction || store.get()?.source) scan();
+      } else if (signature(found) !== signature(extraction)) scan();
+    }
+    // Observe only the page DOM: the bot renders in its own shadow root.
+    if (win.MutationObserver && doc.documentElement && lifecycle.observe) {
+      let pending = null;
+      const observer = new win.MutationObserver(() => {
+        win.clearTimeout(pending);
+        pending = win.setTimeout(refresh, 100);
+      });
+      lifecycle.observe(observer, doc.documentElement, { childList: true, subtree: true, characterData: true, attributes: true });
+      lifecycle.add(() => win.clearTimeout(pending));
+    }
+    if (win.setInterval && lifecycle.add) {
+      const timer = win.setInterval(refresh, 750);
+      lifecycle.add(() => win.clearInterval(timer));
+    }
 
     function scan() {
       if (destroyed) return { error: 'bookmark-destroyed' };
       let found = Gsrs.extractFromDocument(doc, 'storeView');
       if (found?.error === 'profile-mismatch' || found?.detectedProfile === 'retailSync') found = Gsrs.extractFromDocument(doc, 'retailSync');
+      invalidate();
+      extraction = null;
       if (found?.error) {
-        store.set({ status: 'error', diagnostic: found.error, source: null, results: [] });
+        store.set({ status: 'error', diagnostic: found.error, source: null, results: [], initialCandidates: [], observations: [], plan: [], progress: 0, total: 0, activeQuery: null });
         return found;
       }
       extraction = found;
-      store.set({ status: 'ready', profile: found.profile, source: found.source, initialCandidates: found.candidates || [], sourceRowCount: found.sourceRowCount, initialCandidateCount: found.initialCandidateCount, results: [], observations: [], diagnostic: '' });
+      store.set({ status: 'ready', profile: found.profile, source: found.source, initialCandidates: found.candidates || [], sourceRowCount: found.sourceRowCount, initialCandidateCount: found.initialCandidateCount, results: [], observations: [], plan: [], progress: 0, total: 0, activeQuery: null, diagnostic: '' });
       return found;
     }
 
     async function run() {
       if (destroyed) throw new Error('Bookmark was closed');
       if (runner?.isActive?.()) throw new Error('A duplicate check is already active');
-      if (!extraction) scan();
+      scan();
+      const runRevision = revision;
       const current = store.get();
       if (!current?.source) return { status: 'error', observations: [], diagnostic: current?.diagnostic || 'Source table not found' };
       const plan = Engine.createSearchPlan(current.source);
@@ -664,12 +701,14 @@
       }
       runner = Runner.createRunController({
         adapter: (query, runOptions) => Adapter.execute(query, { ...runOptions, timeoutMs: 30000, stableMs: 1500, profile: current.profile }),
-        onState: state => store.set(state),
+        onState: state => { if (!destroyed && runRevision === revision) store.set(state); },
         queryTimeoutMs: 30000,
         runTimeoutMs: 180000,
         safetyDelayMs: 900
       });
       const runResult = await runner.start(plan);
+      refresh();
+      if (destroyed || runRevision !== revision) return { status: 'cancelled', observations: [], results: [] };
       const initial = (current.initialCandidates || []).map(candidate => ({ queryId: 'initial-table', candidate }));
       const searched = (runResult.observations || []).flatMap(observation => (observation.rows || []).map(candidate => ({ queryId: observation.queryId, candidate })));
       const results = Engine.consolidateCandidates(current.source, [...initial, ...searched]);
@@ -693,7 +732,7 @@
       lifecycle.dispose();
       store.destroy();
     }
-    return { scan, run, pause, resume, cancel, openExternal, destroy };
+    return { scan, refresh, run, pause, resume, cancel, openExternal, destroy };
   }
   root.PickerBookmarkController = { create };
 })(typeof globalThis !== 'undefined' ? globalThis : this);
@@ -769,7 +808,7 @@
       $('.fill').style.width = total ? `${Math.min(100, progress / total * 100)}%` : '0%';
       $('.progress-text').textContent = state.activeQuery ? `${progress}/${total} — ${state.activeQuery.label}` : `${progress}/${total} — ${state.status || 'ready'}`;
       const busy=['running','waiting','paused'].includes(state.status); $('.run').disabled=busy||!source.bannerName; $('.google-search').disabled=!googleQuery; $('.retry').disabled=busy||state.status!=='incomplete'; $('.pause').disabled=!busy; setButtonLabel($('.pause'),state.status==='paused'?'Resume':'Pause'); $('.cancel').disabled=!busy;
-      if (state.diagnostic) $('.notice').textContent=state.diagnostic;
+      $('.notice').textContent=state.diagnostic || (state.status === 'ready' ? 'Ready.' : state.status === 'completed' ? 'Checks complete.' : 'Checking current record.');
       const results=$('.results'); results.textContent='';
       (state.results||[]).forEach((item,index)=>{ const candidate=item.candidate||item; const card=document.createElement('article'); card.className=`result ${item.directMatch?'direct':String(item.classification||'').startsWith('Exact')?'exact':''}`; card.innerHTML=`<h4></h4><p class="kind"></p><p class="where"></p><p class="why"></p><div class="result-actions"><button class="btn" data-icon="copy" data-result="td" data-index="${index}">TD Copy</button><button class="btn" data-icon="copy" data-result="full" data-index="${index}">Full Copy</button></div>`; card.querySelector('h4').textContent=candidate.bannerName||`SL_ID ${candidate.slId||'Unknown'}`; card.querySelector('.kind').textContent=item.classification||'Potential duplicate'; card.querySelector('.where').textContent=[candidate.address,candidate.city,candidate.state,candidate.zip].filter(Boolean).join(', '); card.querySelector('.why').textContent=(item.matchedRules||[]).join(' • '); decorateIcons(card); results.appendChild(card); });
       if (!(state.results||[]).length) { const empty=document.createElement('div');empty.className='empty';empty.textContent=state.status==='completed'?'No duplicates found.':'Run checks to see duplicate results.';results.appendChild(empty); }
@@ -780,7 +819,7 @@
     function closePanel() { open=false; panel.classList.remove('open'); }
     function kill() {
       shell.setAttribute('data-state', 'exiting'); closePanel();
-      window.setTimeout(() => { host.remove(); controller.destroy(); onKilled(); }, 700);
+      host.remove(); controller.destroy(); onKilled();
     }
     lifecycle.listen(shadow, 'click', event => {
       const target=event.target.closest('button'); if(!target)return;
@@ -815,7 +854,7 @@
 (function (root) {
   function launch() {
     const existing = window.__pickerBookmarkV1;
-    if (existing) { existing.open(); return existing; }
+    if (existing) { existing.kill(); }
     const lifecycle = root.PickerBookmarkLifecycle.create();
     const store = root.PickerBookmarkStore.create({ status:'ready',results:[],observations:[] });
     const controller = root.PickerBookmarkController.create({ document, window, store, lifecycle });
@@ -825,8 +864,8 @@
       window.alert(`Picker Bookmark v1: Store or Retail Manual Match table not found (${scanned.error}).`);
       return null;
     }
-    const instance = { open(){ bot.open(); }, kill(){ bot.destroy(); } };
-    const bot = root.PickerBookmarkBot.mount({ document, window, store, controller, lifecycle, onKilled(){ delete window.__pickerBookmarkV1; } });
+    const instance = { open(){ controller.refresh(); bot.open(); }, kill(){ bot.destroy(); } };
+    const bot = root.PickerBookmarkBot.mount({ document, window, store, controller, lifecycle, onKilled(){ if (window.__pickerBookmarkV1 === instance) delete window.__pickerBookmarkV1; } });
     window.__pickerBookmarkV1 = instance;
     bot.open();
     return instance;

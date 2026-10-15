@@ -18,6 +18,10 @@
     .filter(Boolean)
     .map(token => suffixes.get(token) || token).join(' ')
     .trim();
+  const addressNoise = new Set('street st road rd avenue ave av boulevard blvd drive dr lane ln highway hwy route rte court ct circle cir place pl terrace ter parkway pkwy way trail trl square sq expressway expy junction jct mount mt mountain mtn fort ft saint west w east e north n south s northeast ne northwest nw southeast se southwest sw'.split(' '));
+  const normalizeBanner = value => normalizeWords(value)
+    .replace(/\b(?:l\s+l\s+c|l\s+t\s+d|i\s+n\s+c)\b/g, ' ')
+    .split(' ').filter(word => word && !['limited','ltd','inc','incorporated','llc','llp','plc','corp','corporation','co','company'].includes(word)).join(' ');
   const digits = value => String(value || '').replace(/\D/g, '');
 
   function createZip3(value) {
@@ -29,8 +33,8 @@
   }
 
   function wildcardWords(value, kind) {
-    let words = (kind === 'address' ? normalizeAddress(value) : normalizeWords(value)).split(' ').filter(Boolean);
-    if (kind === 'address') words = words.filter(word => !['suite', 'ste', 'unit', 'apt'].includes(word));
+    let words = (kind === 'address' ? normalizeAddress(value) : kind === 'banner' ? normalizeBanner(value) : normalizeWords(value)).split(' ').filter(Boolean);
+    if (kind === 'address') words = words.filter(word => !addressNoise.has(word));
     return words.map((word, index) => {
       if (kind === 'address' && index === 0 && /^\d+$/.test(word)) return word;
       if (word.length <= 3) return word;
@@ -45,11 +49,12 @@
       ...raw,
       slId: cleanText(raw.slId),
       bannerName: cleanText(raw.bannerName),
-      bannerKey: normalizeWords(raw.bannerName),
+      bannerKey: normalizeBanner(raw.bannerName),
       address: cleanText(raw.address),
       addressKey: normalizeAddress(raw.address),
       city: cleanText(raw.city),
       cityKey: normalizeWords(raw.city),
+      stateKey: normalizeWords(raw.state),
       zip: cleanText(raw.zip),
       zip3: createZip3(raw.zip),
       storeNumber: cleanText(raw.storeNumber),
@@ -142,5 +147,5 @@
     return [['SL_ID',candidate?.slId],['SL_STORE_NAME',candidate?.bannerName],['SL_STORE_NUMBER',candidate?.storeNumber],['SL_PA_LINE1',candidate?.address],['SL_PA_CITY_NAME',candidate?.city],['SL_PA_STATE_CODE',candidate?.state],['SL_PA_POSTAL_CODE',candidate?.zip],['PHONE',candidate?.phone]].filter(([,v]) => cleanText(v)).map(([h,v]) => `${h}: ${cleanText(v)}`).join('\n');
   };
 
-  return { cleanText, normalizeWords, normalizeAddress, createZip3, wildcardWords, normalizeSource, createSearchPlan, consolidateCandidates, formatTdCopy, formatFullCopy };
+  return { cleanText, normalizeWords, normalizeBanner, normalizeAddress, createZip3, wildcardWords, normalizeSource, createSearchPlan, consolidateCandidates, formatTdCopy, formatFullCopy };
 });

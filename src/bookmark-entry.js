@@ -1,7 +1,7 @@
 (function (root) {
   function launch() {
     const existing = window.__pickerBookmarkV1;
-    if (existing) { existing.open(); return existing; }
+    if (existing) { existing.kill(); }
     const lifecycle = root.PickerBookmarkLifecycle.create();
     const store = root.PickerBookmarkStore.create({ status:'ready',results:[],observations:[] });
     const controller = root.PickerBookmarkController.create({ document, window, store, lifecycle });
@@ -11,8 +11,8 @@
       window.alert(`Picker Bookmark v1: Store or Retail Manual Match table not found (${scanned.error}).`);
       return null;
     }
-    const instance = { open(){ bot.open(); }, kill(){ bot.destroy(); } };
-    const bot = root.PickerBookmarkBot.mount({ document, window, store, controller, lifecycle, onKilled(){ delete window.__pickerBookmarkV1; } });
+    const instance = { open(){ controller.refresh(); bot.open(); }, kill(){ bot.destroy(); } };
+    const bot = root.PickerBookmarkBot.mount({ document, window, store, controller, lifecycle, onKilled(){ if (window.__pickerBookmarkV1 === instance) delete window.__pickerBookmarkV1; } });
     window.__pickerBookmarkV1 = instance;
     bot.open();
     return instance;

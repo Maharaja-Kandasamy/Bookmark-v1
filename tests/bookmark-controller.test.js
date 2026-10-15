@@ -55,3 +55,39 @@ test('blocked outbound link reports false without changing session state', () =>
   win.open = () => null;
   assert.equal(controller.openExternal('https://www.google.com/maps'), false);
 });
+
+test('run rescans the current record and clears previous extraction on failure', async () => {
+  let found = {profile:'storeView',source:{slId:'OLD',bannerName:'Old'},candidates:[]};
+  const {controller,store}=setup({PickerGsrsTableAdapter:{extractFromDocument:()=>found}});
+  controller.scan();
+  found={profile:'storeView',source:{slId:'NEW',bannerName:'New'},candidates:[]};
+  await controller.run();
+  assert.equal(store.get().source.slId,'NEW');
+  found={error:'source-table-not-found'};
+  controller.refresh();
+  assert.equal(store.get().source,null);
+  assert.equal(store.get().results.length,0);
+  assert.equal((await controller.run()).status,'error');
+});
+
+test('changing source cancels an old run and ignores its late updates', async () => {
+  let found={profile:'storeView',source:{slId:'OLD',bannerName:'Old'},candidates:[]};
+  let complete, publish, cancelled=false;
+  const {controller,store}=setup({
+    PickerGsrsTableAdapter:{extractFromDocument:()=>found},
+    PickerRunController:{createRunController:({onState})=>({
+      start:()=>new Promise(resolve=>{complete=resolve;publish=onState;}),
+      cancel:()=>{cancelled=true;},isActive:()=>true
+    })}
+  });
+  const running=controller.run();
+  found={profile:'retailSync',source:{slId:'NEW',bannerName:'New'},candidates:[]};
+  controller.refresh();
+  publish({status:'completed',results:[{slId:'STALE'}]});
+  complete({status:'completed',observations:[]});
+  assert.equal((await running).status,'cancelled');
+  assert.equal(cancelled,true);
+  assert.equal(store.get().source.slId,'NEW');
+  assert.equal(store.get().results.length,0);
+  assert.equal(store.get().status,'ready');
+});
