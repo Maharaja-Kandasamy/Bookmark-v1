@@ -52,4 +52,9 @@ test('robot follows the restrained product visual system', () => {
   assert.match(ui, /class="pupil"/);
   assert.match(ui, /pointermove/);
   assert.match(ui, /translate\(\$\{dx\}px,\$\{dy\}px\)/);
+  assert.match(ui, /class="badge"/);
+  assert.match(ui, /shell\.picking/);
+  assert.match(ui, /shell\.released/);
+  assert.match(ui, /pick-squeeze/);
+  assert.match(ui, /pick-release/);
 });
