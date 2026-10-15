@@ -45,4 +45,6 @@ test('robot follows the restrained product visual system', () => {
   assert.doesNotMatch(ui, /linear-gradient|radial-gradient|backdrop-filter|0 0 13px|[↗✨🤖🚀]/u);
   assert.doesNotMatch(ui, /class="logo">P1/);
   assert.match(ui, /data:image\/png;base64,/);
+  assert.match(ui, /google-search/);
+  assert.match(ui, /https:\/\/www\.google\.com\/search\?q=\$\{encodeURIComponent\(query\)\}/);
 });

@@ -67,7 +67,8 @@ test('installer uses a restrained responsive product layout', () => {
   assert.doesNotMatch(template, /gradient|backdrop-filter|box-shadow:0 28px|[↗✨🤖🚀]/u);
   assert.doesNotMatch(template, /border-radius:(?:1[0-9]|[2-9][0-9])px/);
   assert.doesNotMatch(template, /\.side\{order:-1\}/);
-  assert.match(template, /assets\/picker-logo\.png/);
+  assert.match(template, /assets\/icon-32\.png/);
   assert.doesNotMatch(template, /brand-mark">P1/);
   assert.ok(fs.existsSync(path.join(repo, 'assets', 'picker-logo.png')));
+  for (const size of [16, 32, 48, 128]) assert.ok(fs.existsSync(path.join(repo, 'assets', `icon-${size}.png`)), `icon-${size}`);
 });
