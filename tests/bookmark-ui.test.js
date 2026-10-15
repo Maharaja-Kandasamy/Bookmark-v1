@@ -43,4 +43,6 @@ test('robot follows the restrained product visual system', () => {
   assert.match(ui, /data-icon=/);
   assert.match(ui, /stroke-width="2"/);
   assert.doesNotMatch(ui, /linear-gradient|radial-gradient|backdrop-filter|0 0 13px|[↗✨🤖🚀]/u);
+  assert.doesNotMatch(ui, /class="logo">P1/);
+  assert.match(ui, /data:image\/png;base64,/);
 });
