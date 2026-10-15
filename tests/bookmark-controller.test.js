@@ -91,3 +91,18 @@ test('changing source cancels an old run and ignores its late updates', async ()
   assert.equal(store.get().results.length,0);
   assert.equal(store.get().status,'ready');
 });
+
+test('missing Manual screen shows activation warning and clears it when source becomes available', async () => {
+ let found={error:'source-table-not-found'};
+ const {controller,store}=setup({PickerGsrsTableAdapter:{extractFromDocument:()=>found}});
+ controller.scan();
+ assert.equal(store.get().diagnostic,'You need to be in the Manual screen to activate me.');
+ assert.equal(store.get().diagnosticCode,'source-table-not-found');
+ assert.equal(store.get().source,null);
+ assert.equal((await controller.run()).status,'error');
+ found={profile:'storeView',source:{slId:'NEW',bannerName:'Acme'},candidates:[]};
+ controller.refresh();
+ assert.equal(store.get().diagnostic,'');
+ assert.equal(store.get().diagnosticCode,'');
+ assert.equal(store.get().status,'ready');
+});
