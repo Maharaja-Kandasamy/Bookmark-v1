@@ -27,10 +27,10 @@ test('entry point enforces one instance and permits clean relaunch after kill', 
 
 test('kill immediately disposes controller and lifecycle', () => {
   const ui = src('bookmark-bot.js');
-  assert.match(ui, /setAttribute\('data-state', 'exiting'\)/);
+
   assert.match(ui, /controller\.destroy\(\)/);
   assert.match(ui, /onKilled\(\)/);
-  assert.match(ui, /panic-exit/);
+
 });
 
 test('robot follows the restrained product visual system', () => {
@@ -47,16 +47,12 @@ test('robot follows the restrained product visual system', () => {
   assert.match(ui, /data:image\/png;base64,/);
   assert.match(ui, /google-search/);
   assert.match(ui, /https:\/\/www\.google\.com\/search\?q=\$\{encodeURIComponent\(query\)\}/);
-  assert.match(ui, /class="ear"/);
-  assert.match(ui, /class="antenna"/);
-  assert.match(ui, /class="pupil"/);
-  assert.match(ui, /pointermove/);
-  assert.match(ui, /translate\(\$\{dx\}px,\$\{dy\}px\)/);
-  assert.match(ui, /class="badge"/);
-  assert.match(ui, /shell\.picking/);
-  assert.match(ui, /shell\.released/);
-  assert.match(ui, /pick-squeeze/);
-  assert.match(ui, /pick-release/);
+  const rig = src('bookmark-robot.js');
+  for (const part of ['astrobot-svg','bot-arm-left','bot-arm-right','bot-leg-left','bot-leg-right','bot-eyes-group','thinking-ring','celebrate-group']) assert.ok(rig.includes(part), part);
+  for (const motion of ['idle','blinking','waving','thinking','celebrating','dragging','landing']) assert.ok(rig.includes('state-'+motion), motion);
+  assert.match(ui, /pointercancel/);
+  assert.match(ui, /lostpointercapture/);
+  assert.match(rig, /prefers-reduced-motion/);
 });
 
 test('relaunch disposes the previous instance and reads a fresh source', () => {

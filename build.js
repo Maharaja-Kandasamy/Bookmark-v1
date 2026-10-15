@@ -12,6 +12,7 @@ const inputs = [
   'src/bookmark-store.js',
   'src/bookmark-lifecycle.js',
   'src/bookmark-controller.js',
+  'src/bookmark-robot.js',
   'src/bookmark-bot.js',
   'src/bookmark-entry.js'
 ];

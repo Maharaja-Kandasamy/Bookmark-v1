@@ -18,7 +18,8 @@ If dragging is restricted, use **Copy bookmark link**, create a normal bookmark,
 - Direct, exact, high-confidence, and partial duplicate ranking.
 - Candidate-specific **TD Copy** and **Full Copy**.
 - Source-field and full-store copying.
-- Draggable animated robot with responsive panel placement.
+- AstroBot SVG robot with idle blinking, greeting wave, search thinking, completion celebration, paused blinking, drag dangling, and landing bounce.
+- Responsive panel placement, pointer tracking, and reduced-motion support.
 - Google Address Search and Map Address Search as normal outbound links.
 - Kill Bot cleanup and clean relaunch.
 
