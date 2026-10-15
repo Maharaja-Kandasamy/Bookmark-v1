@@ -1,0 +1,11 @@
+{
+  "name": "picker-bookmark-v1",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Install-free GSRS Store and Retail duplicate assistant",
+  "scripts": {
+    "build": "node build.js",
+    "test": "node --test tests/*.test.js",
+    "verify": "node build.js && node --check picker-bookmark-v1.js && node --test tests/*.test.js"
+  }
+}
