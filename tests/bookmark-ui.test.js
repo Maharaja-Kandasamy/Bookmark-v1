@@ -32,3 +32,15 @@ test('kill animation finishes with controller and lifecycle disposal', () => {
   assert.match(ui, /onKilled\(\)/);
   assert.match(ui, /panic-exit/);
 });
+
+test('robot follows the restrained product visual system', () => {
+  const ui = src('bookmark-bot.js');
+  assert.match(ui, /--accent:#2563eb/);
+  assert.match(ui, /--success:#15803d/);
+  assert.match(ui, /--warning:#b45309/);
+  assert.match(ui, /--error:#b91c1c/);
+  assert.match(ui, /focus-visible/);
+  assert.match(ui, /data-icon=/);
+  assert.match(ui, /stroke-width="2"/);
+  assert.doesNotMatch(ui, /linear-gradient|radial-gradient|backdrop-filter|0 0 13px|[↗✨🤖🚀]/u);
+});

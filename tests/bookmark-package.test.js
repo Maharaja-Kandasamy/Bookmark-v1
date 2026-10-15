@@ -37,7 +37,7 @@ test('install page embeds the exact generated bookmark URL', () => {
   const match = html.match(/id="install-link"[^>]+href="([^"]+)"/);
   assert.ok(match);
   assert.equal(match[1], bookmark);
-  assert.match(html, /Drag Picker Bookmark v1/);
+  assert.match(html, /Install Picker in your bookmarks bar/);
   assert.equal(fs.readFileSync(path.join(repo, 'index.html'), 'utf8'), html);
 });
 
@@ -55,4 +55,16 @@ test('repository contains an automated GitHub Pages deployment', () => {
   assert.match(workflow, /actions\/deploy-pages@v4/);
   assert.match(workflow, /node build\.js/);
   assert.match(workflow, /node --test tests\/\*\.test\.js/);
+});
+
+test('installer uses a restrained responsive product layout', () => {
+  const template = fs.readFileSync(path.join(repo, 'install.template.html'), 'utf8');
+  assert.match(template, /--accent:#2563eb/);
+  assert.match(template, /font-family:Inter,ui-sans-serif,system-ui/);
+  assert.match(template, /:focus-visible/);
+  assert.match(template, /@media\(max-width:640px\)/);
+  assert.match(template, /<svg[^>]+stroke-width="2"/);
+  assert.doesNotMatch(template, /gradient|backdrop-filter|box-shadow:0 28px|[↗✨🤖🚀]/u);
+  assert.doesNotMatch(template, /border-radius:(?:1[0-9]|[2-9][0-9])px/);
+  assert.doesNotMatch(template, /\.side\{order:-1\}/);
 });
