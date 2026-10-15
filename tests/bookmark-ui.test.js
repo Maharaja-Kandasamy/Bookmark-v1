@@ -47,4 +47,9 @@ test('robot follows the restrained product visual system', () => {
   assert.match(ui, /data:image\/png;base64,/);
   assert.match(ui, /google-search/);
   assert.match(ui, /https:\/\/www\.google\.com\/search\?q=\$\{encodeURIComponent\(query\)\}/);
+  assert.match(ui, /class="ear"/);
+  assert.match(ui, /class="antenna"/);
+  assert.match(ui, /class="pupil"/);
+  assert.match(ui, /pointermove/);
+  assert.match(ui, /translate\(\$\{dx\}px,\$\{dy\}px\)/);
 });
