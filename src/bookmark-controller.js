@@ -56,14 +56,15 @@
       return found;
     }
 
-    async function run() {
+    async function run(group = 'all') {
       if (destroyed) throw new Error('Bookmark was closed');
       if (runner?.isActive?.()) throw new Error('A duplicate check is already active');
       scan();
       const runRevision = revision;
       const current = store.get();
       if (!current?.source) return { status: 'error', observations: [], diagnostic: current?.diagnostic || 'Source table not found' };
-      const plan = Engine.createSearchPlan(current.source);
+      const groups = { banner: ['banner-exact-zip','banner-wildcard-zip'], address: ['address-city','address-zip'], phone: ['phone'], store: ['store-banner'] };
+      const plan = Engine.createSearchPlan(current.source).filter(query => group === 'all' || groups[group]?.includes(query.type));
       if (!plan.length) {
         const result = { status: 'incomplete', observations: [], progress: 0, total: 0, diagnostic: 'Not enough source data to create searches' };
         store.set(result);

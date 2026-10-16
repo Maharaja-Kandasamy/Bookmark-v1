@@ -79,11 +79,13 @@
     const dialog = findDialog();
     if (!dialog) return { ok: false, diagnostic: 'Manual Match dialog not open' };
     const profile = options.profile === 'retailSync' ? 'retailSync' : 'storeView';
-    Object.keys(FIELD_CONTROLS).forEach(key => {
-      const { checkbox, input } = discoverControl(dialog, key, profile);
-      if (checkbox?.checked) checkbox.click();
-      if (input) setInputValue(input, '');
+    const existingFields = Object.keys(FIELD_CONTROLS).map(key => {
+      const found = discoverControl(dialog, key, profile);
+      return { ...found, value: found.input?.value };
     });
+    existingFields.forEach(({ checkbox }) => { if (checkbox?.checked) checkbox.click(); });
+    // Some forms clear values when unchecked. Preserve those values while changing search selection.
+    existingFields.forEach(({ input, value }) => { if (input && input.value !== value) setInputValue(input, value); });
     for (const control of controlsForQuery(query, profile)) {
       const found = discoverControl(dialog, control.key, profile);
       const { checkbox, input } = found;
@@ -114,7 +116,7 @@
     });
   }
 
-  async function execute(query, options = {}) {
+  async function executeSearch(query, options = {}) {
     const timeoutMs = options.timeoutMs || 30000;
     const stableMs = options.stableMs || 1500;
     const prepared = prepareQuery(query, { profile:options.profile });
@@ -160,5 +162,36 @@
     });
   }
 
-  return { FIELD_CONTROLS, PROFILE_CONTROLS, controlsForQuery, rowFromCells, findDialog, controlMatchesField, discoverControl, prepareQuery, extractRows, resultObservationRoot, isResultActivity, execute };
+  function captureFields(profile = 'storeView') {
+    const dialog = findDialog();
+    if (!dialog) return null;
+    const source = Gsrs?.extractFromDocument(document, profile);
+    const identity = source?.source ? Gsrs.sourceSignature(source) : null;
+    const fields = Object.keys(FIELD_CONTROLS).map(key => {
+      const { input, checkbox } = discoverControl(dialog, key, profile);
+      return { input, checkbox, value: input?.value, checked: checkbox?.checked };
+    });
+    return { dialog, fields, identity, profile };
+  }
+  function restoreFields(snapshot) {
+    if (!snapshot || findDialog() !== snapshot.dialog) return;
+    if (snapshot.identity) {
+      const current = Gsrs?.extractFromDocument(document, snapshot.profile);
+      if (!current?.source || Gsrs.sourceSignature(current) !== snapshot.identity) return;
+    }
+    snapshot.fields.forEach(({ checkbox, checked }) => {
+      if (checkbox?.isConnected && checkbox.checked !== checked) checkbox.click();
+    });
+    snapshot.fields.forEach(({ input, value }) => {
+      if (input?.isConnected && input.value !== value) setInputValue(input, value);
+    });
+  }
+  async function execute(query, options = {}) {
+    if (options.signal?.aborted) return { status: 'incomplete', rows: [], diagnostic: 'Search cancelled' };
+    const snapshot = captureFields(options.profile);
+    try { return await executeSearch(query, options); }
+    finally { restoreFields(snapshot); }
+  }
+
+  return { FIELD_CONTROLS, PROFILE_CONTROLS, controlsForQuery, rowFromCells, findDialog, controlMatchesField, discoverControl, prepareQuery, extractRows, resultObservationRoot, isResultActivity, captureFields, restoreFields, execute };
 });

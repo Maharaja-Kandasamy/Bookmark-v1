@@ -106,3 +106,16 @@ test('missing Manual screen shows activation warning and clears it when source b
  assert.equal(store.get().diagnosticCode,'');
  assert.equal(store.get().status,'ready');
 });
+
+test('separate searches run only their own group while All Search includes every query', async () => {
+ const types=['banner-exact-zip','banner-wildcard-zip','address-city','address-zip','phone','store-banner'];
+ const {controller}=setup({PickerDuplicateEngine:{
+  createSearchPlan:()=>types.map(type=>({id:type,type})),
+  consolidateCandidates:()=>[]
+ }});
+ for(const [group,expected] of [['banner',types.slice(0,2)],['address',types.slice(2,4)],['phone',['phone']],['store',['store-banner']],['all',types]]){
+  const result=await controller.run(group);
+  assert.deepEqual(Array.from(result.plan,q=>q.type),expected);
+  assert.deepEqual(Array.from(result.observations,q=>q.queryId),expected);
+ }
+});
