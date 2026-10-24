@@ -85,6 +85,8 @@ test('Visuals build and both icon imports contain the current separate bookmark 
   assert.doesNotThrow(() => new Function(payload));
   assert.match(payload, /setPointerCapture/);
   assert.match(payload, /pointercancel/);
+  assert.match(payload, /document\.addEventListener\('pointermove',moveDrag\)/);
+  assert.match(payload, /document\.removeEventListener\('pointermove',moveDrag\)/);
   assert.match(payload, /removeEventListener\('resize'/);
   assert.match(fs.readFileSync(path.join(repo, 'index.html'), 'utf8'), /data-drag/);
   const escape = value => value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
