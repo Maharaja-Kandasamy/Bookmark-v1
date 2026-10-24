@@ -22,7 +22,8 @@ const readable = `${banner}\n${inputs.map(file => fs.readFileSync(path.join(root
 const compact = readable.split(/\r?\n/).map(line => line.trim()).filter(Boolean).join('\n');
 const bookmarkUrl = `javascript:${encodeURIComponent(compact)}`;
 const template = fs.readFileSync(path.join(root, 'install.template.html'), 'utf8');
-const html = template.replaceAll('__BOOKMARK_URL__', bookmarkUrl).replaceAll('__BOOKMARK_KB__', (Buffer.byteLength(bookmarkUrl) / 1024).toFixed(1));
+const gsrsBookmarkUrl = fs.readFileSync(path.join(root, 'gsrs-bookmarklet.txt'), 'utf8').trim();
+const html = template.replaceAll('__GSRS_BOOKMARK_URL__', gsrsBookmarkUrl).replaceAll('__BOOKMARK_URL__', bookmarkUrl).replaceAll('__BOOKMARK_KB__', (Buffer.byteLength(bookmarkUrl) / 1024).toFixed(1));
 
 fs.writeFileSync(path.join(root, 'picker-bookmark-v1.js'), readable);
 fs.writeFileSync(path.join(root, 'picker-bookmark-v1.min.js'), bookmarkUrl);
