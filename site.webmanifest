@@ -7,7 +7,7 @@
   "background_color": "#fafaf7",
   "icons": [
     {
-      "src": "assets/toolkit.svg",
+      "src": "assets/toolkit.svg?v=2",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any"
