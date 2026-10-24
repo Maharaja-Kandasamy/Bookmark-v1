@@ -69,8 +69,8 @@ test('installer uses a restrained responsive product layout', () => {
   assert.match(template, /grid-template-columns:1fr 1fr/);
   assert.match(template, /assets\/picker-logo\.png/);
   assert.match(template, /assets\/visuals-logo\.png/);
-  assert.match(template, /picker-bookmark\.html/);
-  assert.match(template, /gsrs-visuals-bookmark\.html/);
+  assert.doesNotMatch(template, /Import with|import link/);
+
   assert.doesNotMatch(template, /\.side\{order:-1\}/);
   assert.match(template, /assets\/icon-32\.png/);
   assert.doesNotMatch(template, /brand-mark">P1/);
