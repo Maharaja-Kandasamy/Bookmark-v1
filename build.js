@@ -36,6 +36,8 @@ fs.writeFileSync(path.join(root, 'install.html'), html);
 fs.writeFileSync(path.join(root, 'index.html'), html);
 const visualsTemplate = fs.readFileSync(path.join(root, 'gsrs-visuals.template.html'), 'utf8');
 fs.writeFileSync(path.join(root, 'gsrs-visuals.html'), visualsTemplate.replaceAll('__GSRS_BOOKMARK_URL__', gsrsBookmarkUrl));
+const pickerTemplate = fs.readFileSync(path.join(root, 'picker.template.html'), 'utf8');
+fs.writeFileSync(path.join(root, 'picker.html'), pickerTemplate.replaceAll('__BOOKMARK_URL__', bookmarkUrl));
 console.log(`Built Picker Bookmark v1 (${(Buffer.byteLength(bookmarkUrl) / 1024).toFixed(1)} KB)`);
 
 // Standard Netscape bookmark export; browsers decide whether to retain embedded icons.

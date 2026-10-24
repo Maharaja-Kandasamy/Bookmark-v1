@@ -1,4 +1,13 @@
-# Picker Bookmark v1
+# GSRS toolkit
+
+Two independent bookmark tools for GSRS: Picker for Manual Match and GSRS Visuals for New Records.
+
+Published site: [Bookmark-v1](https://maharaja-kandasamy.github.io/Bookmark-v1/).
+
+- [Picker](https://maharaja-kandasamy.github.io/Bookmark-v1/picker.html) · [How it works](https://maharaja-kandasamy.github.io/Bookmark-v1/picker-how-it-works.html)
+- [GSRS Visuals](https://maharaja-kandasamy.github.io/Bookmark-v1/gsrs-visuals.html) · [How it works](https://maharaja-kandasamy.github.io/Bookmark-v1/gsrs-visuals-how-it-works.html)
+
+## Picker Bookmark v1
 
 Picker Bookmark v1 is an install-free Store and Retail duplicate assistant for the GSRS Manual Match screen. It runs only when its bookmark is clicked and leaves no background process behind.
 
