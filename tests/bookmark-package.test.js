@@ -65,12 +65,33 @@ test('installer uses a restrained responsive product layout', () => {
   assert.match(template, /font-family:Inter,ui-sans-serif,system-ui/);
   assert.match(template, /:focus-visible/);
   assert.match(template, /@media\(max-width:640px\)/);
-  assert.match(template, /<svg[^>]+stroke-width="2"/);
   assert.doesNotMatch(template, /gradient|backdrop-filter|box-shadow:0 28px|[↗✨🤖🚀]/u);
-  assert.doesNotMatch(template, /border-radius:(?:1[0-9]|[2-9][0-9])px/);
+  assert.match(template, /grid-template-columns:1fr 1fr/);
+  assert.match(template, /assets\/picker-logo\.png/);
+  assert.match(template, /assets\/visuals-logo\.png/);
+  assert.match(template, /picker-bookmark\.html/);
+  assert.match(template, /gsrs-visuals-bookmark\.html/);
   assert.doesNotMatch(template, /\.side\{order:-1\}/);
   assert.match(template, /assets\/icon-32\.png/);
   assert.doesNotMatch(template, /brand-mark">P1/);
   assert.ok(fs.existsSync(path.join(repo, 'assets', 'picker-logo.png')));
   for (const size of [16, 32, 48, 128]) assert.ok(fs.existsSync(path.join(repo, 'assets', `icon-${size}.png`)), `icon-${size}`);
+});
+
+test('Visuals build and both icon imports contain the current separate bookmark payloads', () => {
+  const visuals = fs.readFileSync(path.join(repo, 'gsrs-bookmarklet.txt'), 'utf8').trim();
+  const picker = fs.readFileSync(path.join(repo, 'picker-bookmark-v1.min.js'), 'utf8').trim();
+  const payload = decodeURIComponent(visuals.slice('javascript:'.length));
+  assert.doesNotThrow(() => new Function(payload));
+  assert.match(payload, /setPointerCapture/);
+  assert.match(payload, /pointercancel/);
+  assert.match(payload, /removeEventListener\('resize'/);
+  assert.match(fs.readFileSync(path.join(repo, 'index.html'), 'utf8'), /data-drag/);
+  const escape = value => value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+  const p = fs.readFileSync(path.join(repo, 'picker-bookmark.html'), 'utf8');
+  const v = fs.readFileSync(path.join(repo, 'gsrs-visuals-bookmark.html'), 'utf8');
+  assert.ok(p.includes(escape(picker)));
+  assert.ok(v.includes(escape(visuals)));
+  assert.notEqual(p.match(/ICON="([^"]+)/)[1], v.match(/ICON="([^"]+)/)[1]);
+  assert.ok(fs.readFileSync(path.join(repo, 'gsrs-visuals.html'), 'utf8').includes(visuals));
 });

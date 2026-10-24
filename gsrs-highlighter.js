@@ -30,15 +30,61 @@ style.textContent=`
 [data-gsrs-match="exact"]{background:#dcfce7!important;color:#14532d!important;box-shadow:inset 4px 0 #16a34a!important}
 [data-gsrs-match="partial"]{background:#fef3c7!important;color:#78350f!important;box-shadow:inset 4px 0 #f59e0b!important}
 [data-gsrs-match="none"]{background:#fee2e2!important;color:#7f1d1d!important;box-shadow:inset 4px 0 #dc2626!important}
-#gsrs-visual-panel{position:fixed;right:16px;bottom:16px;z-index:2147483647;background:white;color:#172033;border:1px solid #cbd5e1;border-radius:10px;box-shadow:0 8px 32px #0003;padding:14px;font:13px/1.45 Arial,sans-serif;width:365px;max-width:calc(100vw - 60px);max-height:70vh;overflow:auto;text-align:left}
-#gsrs-visual-panel table{border-collapse:collapse;width:100%;font:inherit;color:inherit}
-#gsrs-visual-panel th,#gsrs-visual-panel td{padding:4px;text-align:right;border-bottom:1px solid #e2e8f0;background:white;color:#172033}
+#gsrs-visual-panel{all:initial;box-sizing:border-box;position:fixed;right:20px;bottom:20px;z-index:2147483647;width:380px;max-width:calc(100vw - 16px);max-height:calc(100dvh - 16px);display:flex;flex-direction:column;background:#fff;color:#25312e;border:1px solid #dfe5e1;border-radius:18px;box-shadow:0 16px 60px #18382b24;font:12px/1.5 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;text-align:left;overflow:hidden}
+#gsrs-visual-panel *{box-sizing:border-box}
+#gsrs-visual-panel [data-drag]{display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid #edf0ed;cursor:grab;touch-action:none;user-select:none;flex-shrink:0}
+#gsrs-visual-panel [data-drag]:active{cursor:grabbing}
+#gsrs-visual-panel [data-drag] img{width:34px;height:34px;object-fit:contain;border-radius:8px}
+#gsrs-visual-panel .gv-title{font-size:14px;font-weight:650;letter-spacing:-.02em}
+#gsrs-visual-panel .gv-hint{font-size:10px;color:#738079}
+#gsrs-visual-panel .gv-grip{margin-left:auto;color:#9ca7a0;font-size:20px}
+#gsrs-visual-panel .gv-body{padding:14px 18px 16px;overflow:auto;min-height:0}
+#gsrs-visual-panel .gv-legend{display:flex;gap:15px;color:#69766f;font-size:11px;margin-bottom:12px}
+#gsrs-visual-panel .gv-legend span:before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:5px;background:var(--dot)}
+#gsrs-visual-panel [data-summary]{color:#69766f;font-size:11px;margin-bottom:12px}
+#gsrs-visual-panel table{border-collapse:collapse;width:100%;font:inherit;color:inherit;table-layout:auto}
+#gsrs-visual-panel th,#gsrs-visual-panel td{padding:7px 3px;text-align:right;border:0;border-bottom:1px solid #edf0ed;background:#fff;color:#25312e;white-space:normal}
+#gsrs-visual-panel th{font-size:10px;font-weight:500;color:#738079}
 #gsrs-visual-panel th:first-child,#gsrs-visual-panel td:first-child{text-align:left}
-#gsrs-visual-panel button{font:inherit;margin:5px 5px 5px 0;padding:5px 8px;border:1px solid #94a3b8;border-radius:5px;background:#f8fafc;color:#172033;cursor:pointer}`;
+#gsrs-visual-panel td:not(:first-child){font-variant-numeric:tabular-nums;font-weight:600}
+#gsrs-visual-panel td:nth-child(2){color:#23815c}#gsrs-visual-panel td:nth-child(3){color:#b07b18}#gsrs-visual-panel td:nth-child(4){color:#c15b54}
+#gsrs-visual-panel [data-status]{font-size:11px;color:#738079;margin:12px 0}
+#gsrs-visual-panel .gv-actions{display:flex;gap:6px;flex-wrap:wrap}
+#gsrs-visual-panel button{font:500 11px/1.4 system-ui,sans-serif;padding:8px 10px;border:1px solid #dfe5e1;border-radius:8px;background:#fff;color:#46554c;cursor:pointer;margin:0}
+#gsrs-visual-panel button[data-refresh]{background:#263e32;color:#fff;border-color:#263e32}
+#gsrs-visual-panel button[data-close]{margin-left:auto;color:#97615c}
+#gsrs-visual-panel button:hover{filter:brightness(.95)}#gsrs-visual-panel button:disabled{opacity:.5;cursor:wait}
+#gsrs-visual-panel :focus-visible{outline:2px solid #448667;outline-offset:-3px}
+#gsrs-visual-panel .gv-footnote{font-size:10px;color:#929b95;margin-top:12px}
+`;
 document.head.append(style);
 const panel=document.createElement('aside');panel.id='gsrs-visual-panel';panel.setAttribute('aria-label','GSRS field comparison');
-panel.innerHTML='<strong style="display:flex;align-items:center;gap:8px"><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAUoSURBVFhHjVfdT1xFFOcfsU353M/7sbt3d6Egn4VKK5SwtLAUsRoSQ6oWbYNWaZTGYBVqE6m1Fm1ri6UJtSgtICFNY7QPJlYfePChsQ81EkhQ0UJZWPZnZu69e2fm3qXd5Je5c+bMOb9z5sy5d7M0Ta0sKg71hsNqbziq6qMTyJoJdi7qiPs2AfGbFQ4rA2XlhSgqDmF7sYbtdAwZc2vU1wSU6GMRs8+mk5brtlgQv1mECVEMRxSEI6oxOkFFJErWWR1zzoKVizZ4EFIGgRCz0a5oghCwSPC64pr+bK7b9cmcIWBmIBOsyHhHoo5dFjEgrhEbDhnIBMNx2pARJUNMdGCHuE4IaMgKheUnIJApxaxRcf54ZCQQiQYgyW4UuLbB5c6Gx5tryA3HJmwErGeSHV9IgickwR30Q9ZkRJwIOB0Bcd7eHsf4+BimvpvA8ePH4PXlZYichS4nzr0hCYdrn8ZE226Mte5Ca0UUsiZxexkCGle1eflbMTJyCeyv/fk43J5cmh07CYsYce7XZNSXhrHwSguWu1qBI8/hk1g18gN+hqhRAywB04gku9AYq8Py8r9YX1+lBO7e/Ql+qQAhkkrbdTScR1VoEYVGf6NtN/47FMf8yy2437kXtSUaFE3OTIA1QpCbtwVDQ2eo89XVh3Ts6elGfv7WTQm4gxLeqC1F6rX9WHo1jo3X29C3p4JGb9WAjYDYiFQoqgfFJRHMzf2BjY11pFJJPHhwH4VFQQSCPptjE25Vwpt1pbgQ34lzzTX4oKGS2gyF7bUi9AG2aegVT2qht7eHRp8wsjA4+BFy87eka4HCIOGS/Dj6YilmLzbizmd78PP5Bjxbq8GrSo7NSDgCq5hMhDQJiuLB7OyvAFJIJhP45+9FVFeXQVbcHAElKKO8NIjfh5uw9E0LVidaMXOyjso1h+iFIxBbMROVOxudnR2UQCKxTLNw9eowzQ5bCyT6z9+qwcqNVsyPNmPhWjNiuyLwKRKjxwe5aQ2wmwiJW7emqfO1tUdIJB5h774G+Pz5VEcKyKjfEcDclRjmR2J4+G0zznTXoMDv50haJGxHoNeASSCdWmOj15+HpqZ6JBIrlAD5zcxMocC9jeorqh/N+6rwTncjjh1pxKGOGoTDslF4lh0xyxmOgGdMn42CvHLlSz0LiRV6Kw68sB/Z2U+hPrYDF8Y/xNmvT+Di1CnEO5rg8zM1YtTJExNgiZiQFQ8qq0qwuLiAZHKNErnz4/dwuXPQd/owLk8O4NLNfgwMHaVFp5Gmw5293batE/KKPPtoNECbU/9An5GFZaSSSXx6fgBnR9/FF2PvY3jqJGLxWkiShyPPR66kiTl2QpYEl8KoikDQT6/mvXu/AakNbCTX8dfSnzh37T1cnuxHz4mDkGWv416eREYCdiXrtavPySu6q+ug3pzItUxt4IdfbuLjr95GeVURVNVnc64TsAI0ZZscgQ52IxuJ25OD27dnKAn9t4oDLzXB6y2wnKYd2r8dzMC4a2g5c8iCkFLyvbDzmQpcvz6K6elJnB48hWBQooXHOreCEu3qMlsfyLyBJxEtDEANeFHgyqZNyuXJoZVvZUnfbz0L0RvzDAREEgwZx3MVsiXYsOs5ZsCsAWdF1pipxxPhvxd5gpZd2h/SLyaHI2CdsdXPERKy8DjYA3IkwH8RpZ2Lo/CeMKMUZSJMGxYhXWa/BUzU3GYhO6KDtK6DjFtnM2wRUAZKy6J0kgnWP2cNxcY/YgrzmZUZOpyeI0Igfv8HMUsbjI7sLrgAAAAASUVORK5CYII=" width="24" height="24" alt="GSRS Visuals" style="border-radius:4px">GSRS field comparison</strong><div>Green: Exact · Amber: Partial · Red: No Match</div><div data-summary></div><table><thead><tr><th>Field</th><th>Exact</th><th>Partial</th><th>No Match</th></tr></thead><tbody></tbody></table><div data-status role="status" aria-live="polite"></div><button data-size>Show 100 (optional)</button><button data-refresh>Recheck</button><button data-close>Remove</button><div style="font-size:11px">Current page · child values only · blanks excluded</div>';
+panel.innerHTML='<div data-drag tabindex="0" role="button" aria-label="Move GSRS Visuals. Drag or use arrow keys; Shift moves faster."><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAUoSURBVFhHjVfdT1xFFOcfsU353M/7sbt3d6Egn4VKK5SwtLAUsRoSQ6oWbYNWaZTGYBVqE6m1Fm1ri6UJtSgtICFNY7QPJlYfePChsQ81EkhQ0UJZWPZnZu69e2fm3qXd5Je5c+bMOb9z5sy5d7M0Ta0sKg71hsNqbziq6qMTyJoJdi7qiPs2AfGbFQ4rA2XlhSgqDmF7sYbtdAwZc2vU1wSU6GMRs8+mk5brtlgQv1mECVEMRxSEI6oxOkFFJErWWR1zzoKVizZ4EFIGgRCz0a5oghCwSPC64pr+bK7b9cmcIWBmIBOsyHhHoo5dFjEgrhEbDhnIBMNx2pARJUNMdGCHuE4IaMgKheUnIJApxaxRcf54ZCQQiQYgyW4UuLbB5c6Gx5tryA3HJmwErGeSHV9IgickwR30Q9ZkRJwIOB0Bcd7eHsf4+BimvpvA8ePH4PXlZYichS4nzr0hCYdrn8ZE226Mte5Ca0UUsiZxexkCGle1eflbMTJyCeyv/fk43J5cmh07CYsYce7XZNSXhrHwSguWu1qBI8/hk1g18gN+hqhRAywB04gku9AYq8Py8r9YX1+lBO7e/Ql+qQAhkkrbdTScR1VoEYVGf6NtN/47FMf8yy2437kXtSUaFE3OTIA1QpCbtwVDQ2eo89XVh3Ts6elGfv7WTQm4gxLeqC1F6rX9WHo1jo3X29C3p4JGb9WAjYDYiFQoqgfFJRHMzf2BjY11pFJJPHhwH4VFQQSCPptjE25Vwpt1pbgQ34lzzTX4oKGS2gyF7bUi9AG2aegVT2qht7eHRp8wsjA4+BFy87eka4HCIOGS/Dj6YilmLzbizmd78PP5Bjxbq8GrSo7NSDgCq5hMhDQJiuLB7OyvAFJIJhP45+9FVFeXQVbcHAElKKO8NIjfh5uw9E0LVidaMXOyjso1h+iFIxBbMROVOxudnR2UQCKxTLNw9eowzQ5bCyT6z9+qwcqNVsyPNmPhWjNiuyLwKRKjxwe5aQ2wmwiJW7emqfO1tUdIJB5h774G+Pz5VEcKyKjfEcDclRjmR2J4+G0zznTXoMDv50haJGxHoNeASSCdWmOj15+HpqZ6JBIrlAD5zcxMocC9jeorqh/N+6rwTncjjh1pxKGOGoTDslF4lh0xyxmOgGdMn42CvHLlSz0LiRV6Kw68sB/Z2U+hPrYDF8Y/xNmvT+Di1CnEO5rg8zM1YtTJExNgiZiQFQ8qq0qwuLiAZHKNErnz4/dwuXPQd/owLk8O4NLNfgwMHaVFp5Gmw5293batE/KKPPtoNECbU/9An5GFZaSSSXx6fgBnR9/FF2PvY3jqJGLxWkiShyPPR66kiTl2QpYEl8KoikDQT6/mvXu/AakNbCTX8dfSnzh37T1cnuxHz4mDkGWv416eREYCdiXrtavPySu6q+ug3pzItUxt4IdfbuLjr95GeVURVNVnc64TsAI0ZZscgQ52IxuJ25OD27dnKAn9t4oDLzXB6y2wnKYd2r8dzMC4a2g5c8iCkFLyvbDzmQpcvz6K6elJnB48hWBQooXHOreCEu3qMlsfyLyBJxEtDEANeFHgyqZNyuXJoZVvZUnfbz0L0RvzDAREEgwZx3MVsiXYsOs5ZsCsAWdF1pipxxPhvxd5gpZd2h/SLyaHI2CdsdXPERKy8DjYA3IkwH8RpZ2Lo/CeMKMUZSJMGxYhXWa/BUzU3GYhO6KDtK6DjFtnM2wRUAZKy6J0kgnWP2cNxcY/YgrzmZUZOpyeI0Igfv8HMUsbjI7sLrgAAAAASUVORK5CYII=" alt=""><div><div class="gv-title">GSRS Visuals</div><div class="gv-hint">Field comparison · drag to move</div></div><span class="gv-grip" aria-hidden="true">⠿</span></div><div class="gv-body"><div class="gv-legend"><span style="--dot:#23815c">Exact</span><span style="--dot:#d5a33a">Partial</span><span style="--dot:#c15b54">No match</span></div><div data-summary></div><table><thead><tr><th>Field</th><th>Exact</th><th>Partial</th><th>No Match</th></tr></thead><tbody></tbody></table><div data-status role="status" aria-live="polite"></div><div class="gv-actions"><button data-refresh>Recheck</button><button data-size>Show 100</button><button data-close>Remove</button></div><div class="gv-footnote">Current page · child values only · blanks excluded</div></div>';
 document.body.append(panel);
+// Keep the handle reachable on small screens and after a viewport change.
+const dragHandle=panel.querySelector('[data-drag]');
+let drag=null;
+function movePanel(x,y){
+ const rect=panel.getBoundingClientRect();
+ panel.style.left=Math.max(8,Math.min(x,window.innerWidth-rect.width-8))+'px';
+ panel.style.top=Math.max(8,Math.min(y,window.innerHeight-rect.height-8))+'px';
+ panel.style.right='auto';panel.style.bottom='auto';
+}
+function keepPanelVisible(){const r=panel.getBoundingClientRect();movePanel(r.left,r.top);}
+dragHandle.addEventListener('pointerdown',e=>{
+ if(!e.isPrimary||e.button!==0)return;
+ const r=panel.getBoundingClientRect();drag={id:e.pointerId,x:e.clientX-r.left,y:e.clientY-r.top};
+ dragHandle.setPointerCapture(e.pointerId);e.preventDefault();dragHandle.focus({preventScroll:true});
+});
+dragHandle.addEventListener('pointermove',e=>{if(drag?.id===e.pointerId)movePanel(e.clientX-drag.x,e.clientY-drag.y);});
+const endDrag=()=>{drag=null;};
+dragHandle.addEventListener('pointerup',endDrag);dragHandle.addEventListener('pointercancel',endDrag);dragHandle.addEventListener('lostpointercapture',endDrag);
+dragHandle.addEventListener('keydown',e=>{
+ const directions={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]},d=directions[e.key];
+ if(!d)return;e.preventDefault();const r=panel.getBoundingClientRect(),step=e.shiftKey?40:10;movePanel(r.left+d[0]*step,r.top+d[1]*step);
+});
+window.addEventListener('resize',keepPanelVisible);
+keepPanelVisible();
 const status=s=>panel.querySelector('[data-status]').textContent=s;
 let stopped=false,timer,busy=false;
 const table=()=>scope.querySelector('[data-testid="newrecords-table"] table');
@@ -62,6 +108,7 @@ function refresh(){
  panel.querySelector('tbody').replaceChildren(...fields.map(([label],i)=>{const r=document.createElement('tr');[label,counts[i].exact,counts[i].partial,counts[i].none].forEach(v=>{const c=document.createElement('td');c.textContent=v;r.append(c);});return r;}));
  panel.querySelector('[data-summary]').textContent=`${rows.length} parents · ${candidates} children · ${skipped} blank comparisons skipped`;
  if(!busy)status(map.includes(-1)?'Some fields unavailable; see console warnings.':'Active on this page.');
+ keepPanelVisible();
 }
 // Relative XPath avoids repeated demo-simple-select IDs and unrelated pagination controls.
 const xp=(path,root=scope)=>document.evaluate(path,root,null,XPathResult.FIRST_ORDERED_NODE_TYPE,null).singleNodeValue;
@@ -92,7 +139,7 @@ async function show100(){
 }
 const observer=new MutationObserver(()=>{if(busy||stopped)return;clearTimeout(timer);timer=setTimeout(refresh,300);});
 observer.observe(scope,{childList:true,subtree:true,characterData:true});
-function remove(){stopped=true;clearTimeout(timer);observer.disconnect();scope.querySelectorAll('[data-gsrs-match]').forEach(e=>e.removeAttribute('data-gsrs-match'));panel.remove();style.remove();delete window[key];}
+function remove(){window.removeEventListener('resize',keepPanelVisible);drag=null;stopped=true;clearTimeout(timer);observer.disconnect();scope.querySelectorAll('[data-gsrs-match]').forEach(e=>e.removeAttribute('data-gsrs-match'));panel.remove();style.remove();delete window[key];}
 panel.querySelector('[data-size]').onclick=show100;panel.querySelector('[data-refresh]').onclick=refresh;panel.querySelector('[data-close]').onclick=remove;
 window[key]={refresh,remove};refresh();
 })();

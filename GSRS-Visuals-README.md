@@ -6,11 +6,15 @@
 3. Drag the GSRS Visuals button onto that bar.
 4. Open the live GSRS New Records screen and click the bookmark.
 
-Alternatively create a bookmark, edit its URL and paste ALL of bookmarklet.txt.
+Alternatively create a bookmark, edit its URL and paste ALL of gsrs-bookmarklet.txt.
 The installer and readable source require no installation or dependencies.
 
 ## Use
 Activation colours the child value blocks and adds one summary panel.
+Drag the panel header anywhere on screen. Tab to the header and use arrow keys
+(or Shift + arrow keys for larger steps) to move it with the keyboard.
+The panel stays inside the viewport when resizing.
+Replace a previously saved bookmark to receive this UI update.
 Show 100 is optional: it uses XPath to find the New Records page-size control,
 opens the Material UI menu and clicks 100, invoking the page's own change handler.
 It watches table mutations and waits for a stable table and no visible loading indicator.

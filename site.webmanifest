@@ -1,20 +1,16 @@
 {
-  "name": "GSRS Visuals",
-  "short_name": "Visuals",
+  "name": "GSRS toolkit — Picker & Visuals",
+  "short_name": "GSRS toolkit",
   "start_url": "./",
   "display": "browser",
-  "theme_color": "#34362f",
+  "theme_color": "#263e32",
   "background_color": "#fafaf7",
   "icons": [
     {
-      "src": "assets/icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png"
-    },
-    {
-      "src": "assets/icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png"
+      "src": "assets/toolkit.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
     }
   ]
 }
