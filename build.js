@@ -30,3 +30,13 @@ fs.writeFileSync(path.join(root, 'picker-bookmark-v1.min.js'), bookmarkUrl);
 fs.writeFileSync(path.join(root, 'install.html'), html);
 fs.writeFileSync(path.join(root, 'index.html'), html);
 console.log(`Built Picker Bookmark v1 (${(Buffer.byteLength(bookmarkUrl) / 1024).toFixed(1)} KB)`);
+
+// Standard Netscape bookmark export; browsers decide whether to retain embedded icons.
+const iconData = 'data:image/png;base64,' + fs.readFileSync(path.join(root, 'assets/icon-32.png')).toString('base64');
+const escapeAttr = value => value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+fs.writeFileSync(path.join(root, 'gsrs-visuals-bookmark.html'), `<!DOCTYPE NETSCAPE-Bookmark-file-1>
+<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">
+<TITLE>GSRS Visuals Bookmark</TITLE>
+<H1>GSRS Visuals Bookmark</H1>
+<DL><p><DT><A HREF="${escapeAttr(gsrsBookmarkUrl)}" ICON="${iconData}">GSRS Visuals</A></DL><p>
+`);
