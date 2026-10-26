@@ -13,6 +13,7 @@ function setup(overrides = {}) {
   const source = { slId: 'SOURCE', bannerName: 'Zone Appliance', storeNumber: '12', address: '10 Main St', city: 'Austin', state: 'TX', zip: '78701', phone: '5125551212' };
   const dependencies = {
     PickerDuplicateEngine: {
+      normalizeZip: require('../vendor/duplicate-engine').normalizeZip,
       createSearchPlan: () => [{ id: 'one', label: 'One' }, { id: 'two', label: 'Two' }],
       consolidateCandidates: (_source, rows) => rows.map(x => x.candidate)
     },
@@ -110,6 +111,7 @@ test('missing Manual screen shows activation warning and clears it when source b
 test('separate searches run only their own group while All Search includes every query', async () => {
  const types=['banner-exact-zip','banner-wildcard-zip','address-city','address-zip','phone','store-banner'];
  const {controller}=setup({PickerDuplicateEngine:{
+  normalizeZip: require('../vendor/duplicate-engine').normalizeZip,
   createSearchPlan:()=>types.map(type=>({id:type,type})),
   consolidateCandidates:()=>[]
  }});
@@ -118,4 +120,12 @@ test('separate searches run only their own group while All Search includes every
   assert.deepEqual(Array.from(result.plan,q=>q.type),expected);
   assert.deepEqual(Array.from(result.observations,q=>q.queryId),expected);
  }
+});
+
+test('source ZIP displayed by the bot is corrected without changing the extracted record', () => {
+ const source={slId:'A',bannerName:'Acme',zip:'987-7678'};
+ const {controller,store}=setup({PickerGsrsTableAdapter:{extractFromDocument:()=>({profile:'storeView',source,candidates:[]})}});
+ controller.scan();
+ assert.equal(store.get().source.zip,'00987');
+ assert.equal(source.zip,'987-7678');
 });

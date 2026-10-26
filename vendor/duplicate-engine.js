@@ -24,12 +24,15 @@
     .split(' ').filter(word => word && !['limited','ltd','inc','incorporated','llc','llp','plc','corp','corporation','co','company'].includes(word)).join(' ');
   const digits = value => String(value || '').replace(/\D/g, '');
 
+  function normalizeZip(value) {
+    const base = String(value ?? '').trim().split(/[-–—]/, 1)[0];
+    const zip = digits(base);
+    return zip ? zip.slice(0, 5).padStart(5, '0') : '';
+  }
+
   function createZip3(value) {
-    let zip = digits(value);
-    if (!zip) return '';
-    if (zip.length > 5) zip = zip.slice(0, 5);
-    zip = zip.padStart(5, '0');
-    return `${zip.slice(0, 3)}*`;
+    const zip = normalizeZip(value);
+    return zip ? `${zip.slice(0, 3)}*` : '';
   }
 
   function wildcardWords(value, kind) {
@@ -55,7 +58,7 @@
       city: cleanText(raw.city),
       cityKey: normalizeWords(raw.city),
       stateKey: normalizeWords(raw.state),
-      zip: cleanText(raw.zip),
+      zip: normalizeZip(raw.zip),
       zip3: createZip3(raw.zip),
       storeNumber: cleanText(raw.storeNumber),
       storeKey: normalizeWords(raw.storeNumber),
@@ -103,7 +106,7 @@
     for (const [field,key,points,label] of [['city','cityKey',10,'Same city'],['state','stateKey',10,'Same state']]) {
       if(source[key]&&source[key]===other[key]){fieldMatches[field]=true;score+=points;rules.push(label);}
     }
-    const sourceZip=digits(source.zip).slice(0,5);const otherZip=digits(other.zip).slice(0,5);
+    const sourceZip=normalizeZip(source.zip);const otherZip=normalizeZip(other.zip);
     if(sourceZip&&sourceZip===otherZip){fieldMatches.zip=true;score+=10;rules.push('Same ZIP');}
     const samePhone10=!!(source.phone10&&source.phone10===other.phone10);
     const samePhone7=!!(source.phone7&&source.phone7===other.phone7);
@@ -148,5 +151,5 @@
     return [['SL_ID',candidate?.slId],['SL_STORE_NAME',candidate?.bannerName],['SL_STORE_NUMBER',candidate?.storeNumber],['SL_PA_LINE1',candidate?.address],['SL_PA_CITY_NAME',candidate?.city],['SL_PA_STATE_CODE',candidate?.state],['SL_PA_POSTAL_CODE',candidate?.zip],['PHONE',candidate?.phone]].filter(([,v]) => cleanText(v)).map(([h,v]) => `${h}: ${cleanText(v)}`).join('\n');
   };
 
-  return { cleanText, normalizeWords, normalizeBanner, normalizeAddress, createZip3, wildcardWords, normalizeSource, createSearchPlan, consolidateCandidates, formatTdCopy, formatFullCopy };
+  return { cleanText, normalizeWords, normalizeBanner, normalizeAddress, normalizeZip, createZip3, wildcardWords, normalizeSource, createSearchPlan, consolidateCandidates, formatTdCopy, formatFullCopy };
 });

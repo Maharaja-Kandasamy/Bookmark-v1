@@ -52,7 +52,7 @@
         return found;
       }
       extraction = found;
-      store.set({ status: 'ready', profile: found.profile, source: found.source, initialCandidates: found.candidates || [], sourceRowCount: found.sourceRowCount, initialCandidateCount: found.initialCandidateCount, results: [], observations: [], plan: [], progress: 0, total: 0, activeQuery: null, diagnostic: '', diagnosticCode: '' });
+      store.set({ status: 'ready', profile: found.profile, source: { ...found.source, zip: Engine.normalizeZip(found.source.zip) }, initialCandidates: found.candidates || [], sourceRowCount: found.sourceRowCount, initialCandidateCount: found.initialCandidateCount, results: [], observations: [], plan: [], progress: 0, total: 0, activeQuery: null, diagnostic: '', diagnosticCode: '' });
       return found;
     }
 
