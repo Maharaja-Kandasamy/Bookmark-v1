@@ -83,7 +83,7 @@
       .replace(/\b(?:https?:\/\/|www\.)\S+/gi, ' ')
       .replace(/\b[^\s@]+@[^\s@]+\.[^\s@]+\b/g, ' ')
       .replace(/&/g, ' ');
-    const words = normalizeWords(text).split(' ').filter(word => word.length > 1 && !/^\d{7,}$/.test(word) && !['undefined','null','nan'].includes(word));
+    const words = normalizeWords(text).split(' ').filter(word => word.length > 1 && !/^\d{7,}$/.test(word) && !['undefined','null','nan','and'].includes(word));
     return normalizeBanner(words.join(' ')).split(' ').filter(word => word.length > 1);
   }
 

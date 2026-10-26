@@ -151,3 +151,14 @@ test('human-readable match explanations include specific unit conflicts',()=>{
  assert.match(engine.explainCandidate(source,ranked[0]).summary,/Same address and unit; Same business name/);
  assert.deepEqual(engine.explainCandidate(source,ranked[1]).conflicts,['Different unit: 200 instead of 100']);
 });
+
+test('standalone and becomes one wildcard boundary while words containing and are kept',()=>{
+ for(const [banner,expected] of [['Bread and Butter','brea*butt*'],['Bread AND Butter','brea*butt*'],['Bread & Butter','brea*butt*'],['Bread and and Butter','brea*butt*'],['Circle and K','circle*'],['Candy and More','cand*more*']]){
+  assert.equal(engine.wildcardWords(banner,'banner'),expected);
+ }
+ assert.equal(engine.wildcardWords('Candy','banner'),'candy*');
+ assert.equal(engine.wildcardWords('and','banner'),'');
+ const plan=engine.createSearchPlan({bannerName:'Bread and Butter',zip:'98407',storeNumber:'7'});
+ assert.equal(plan.find(q=>q.type==='banner-exact-zip').fields.banner,'bread butter');
+ assert.equal(plan.find(q=>q.type==='store-banner').fields.banner,'brea*butt*');
+});
