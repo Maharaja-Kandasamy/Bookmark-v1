@@ -64,3 +64,8 @@ The test fixture is not bundled because it contains your store data.
 Live GSRS network/reload behavior and Edge have not been directly tested.
 A site's security policy may block bookmarklets; a browser extension is a fallback
 if your managed browser blocks activation.
+
+## Phone and partial address updates
+RS and SL prefixes are detected dynamically, including underscore separators.
+Both phone columns compare the last seven digits after removing formatting, a US country code and extensions. Zeros are preserved. Parent area codes are checked against each child’s area code; local matches with area-code differences or missing area codes are partial.
+An extra business prefix or missing street words can produce a partial address match when the house number and core street name agree. Route and unit number differences remain red.
