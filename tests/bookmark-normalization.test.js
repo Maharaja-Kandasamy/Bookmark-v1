@@ -164,10 +164,26 @@ test('standalone and becomes one wildcard boundary while words containing and ar
 });
 
 test('numbers and removed prefixes keep their wildcard position in banner searches',()=>{
- for(const [raw,expected] of [['7 Eleven','*eleven*'],['7Eleven','*eleven*'],['123 Eleven','*eleven*'],['@ Eleven','*eleven*'],['and Eleven','*eleven*'],['Eleven 123','eleven*'],['Bread 123 Butter','brea*butt*'],['123','']])assert.equal(engine.wildcardWords(raw,'banner'),expected,raw);
+ for(const [raw,expected] of [['7 Eleven','*eleven*'],['7Eleven','*eleven*'],['123 Eleven','*eleven*'],['@ Eleven','*eleven*'],['and Eleven','*eleven*'],['Eleven 123','eleven*'],['Bread 123 Butter','brea*butt*']])assert.equal(engine.wildcardWords(raw,'banner'),expected,raw);
  const plan=engine.createSearchPlan({bannerName:'7 Eleven',zip:'98407',storeNumber:'7'});
  const bannerQueries=plan.filter(q=>q.fields.banner);
  assert.ok(bannerQueries.length);
  bannerQueries.forEach(query=>assert.equal(query.fields.banner,'*eleven*'));
  assert.equal(plan.filter(q=>q.fields.zip).length,1);
+});
+
+
+test('numeric-only brands keep their digits while hashtag store numbers stay separate',()=>{
+ for(const bannerName of ['76',' 76 ','76 #00123','123']){
+  const expected=bannerName.trim()==='123'?'*123*':'*76*';
+  assert.equal(engine.wildcardWords(bannerName,'banner'),expected);
+  const plan=engine.createSearchPlan({bannerName,zip:'98407',storeNumber:'123'});
+  assert.equal(plan.find(q=>q.type==='banner-wildcard-zip').fields.banner,expected);
+  assert.equal(plan.find(q=>q.type==='store-banner').fields.banner,expected);
+  assert.equal(plan.filter(q=>q.fields.zip).length,1);
+ }
+ const storeQuery=engine.createSearchPlan({bannerName:'76 #00123'}).find(q=>q.type==='store-banner');
+ assert.equal(storeQuery.fields.storeNumber,'00123');
+ assert.equal(storeQuery.fields.banner,'*76*');
+ assert.equal(engine.wildcardWords('#00123','banner'),'');
 });

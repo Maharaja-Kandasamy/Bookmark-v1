@@ -92,6 +92,8 @@
   function wildcardWords(value, kind) {
     if (kind === 'address') return addressWildcard(value);
     if (kind === 'banner') {
+      const numericBrand = cleanText(withoutBannerStoreNumber(value));
+      if (/^\d+$/.test(numericBrand)) return `*${numericBrand}*`;
       const words = bannerSearchWords(value);
       if (!words.length) return '';
       const firstIndex = cleanText(value).toLowerCase().indexOf(words[0]);
