@@ -25,10 +25,20 @@
     .split(' ').filter(word => word && !['limited','ltd','inc','incorporated','llc','llp','plc','corp','corporation','co','company'].includes(word)).join(' ');
   const digits = value => String(value || '').replace(/\D/g, '');
 
+  function normalizePostal(value) {
+    const text = String(value ?? '').trim().replace(/[��]/g, '-').replace(/\s*-\s*/g, '-');
+    if (/^\d{1,5}$/.test(text)) return text.padStart(5, '0');
+    const extended = text.match(/^(\d{1,5})-(\d{4})$/);
+    if (extended) return `${extended[1].padStart(5, '0')}-${extended[2]}`;
+    if (/^\d{6,9}$/.test(text)) {
+      const full = text.padStart(9, '0');
+      return `${full.slice(0, 5)}-${full.slice(5)}`;
+    }
+    return '';
+  }
+
   function normalizeZip(value) {
-    const base = String(value ?? '').trim().split(/[-��]/, 1)[0];
-    const zip = digits(base);
-    return zip ? zip.slice(0, 5).padStart(5, '0') : '';
+    return normalizePostal(value).slice(0, 5);
   }
 
   function createZip3(value) {
@@ -152,7 +162,7 @@
     return [['SL_ID',candidate?.slId],['SL_STORE_NAME',candidate?.bannerName],['SL_STORE_NUMBER',candidate?.storeNumber],['SL_PA_LINE1',candidate?.address],['SL_PA_CITY_NAME',candidate?.city],['SL_PA_STATE_CODE',candidate?.state],['SL_PA_POSTAL_CODE',candidate?.zip],['PHONE',candidate?.phone]].filter(([,v]) => cleanText(v)).map(([h,v]) => `${h}: ${cleanText(v)}`).join('\n');
   };
 
-  return { cleanText, normalizeWords, normalizeBanner, normalizeAddress, normalizeZip, createZip3, wildcardWords, normalizeSource, createSearchPlan, consolidateCandidates, formatTdCopy, formatFullCopy };
+  return { cleanText, normalizeWords, normalizeBanner, normalizeAddress, normalizePostal, normalizeZip, createZip3, wildcardWords, normalizeSource, createSearchPlan, consolidateCandidates, formatTdCopy, formatFullCopy };
 });
 (function (root, factory) {
   const api = factory();

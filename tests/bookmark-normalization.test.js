@@ -42,3 +42,22 @@ test('matching ZIP evidence compares the corrected five-digit bases', () => {
  const [result]=engine.consolidateCandidates({zip:'987-7678'},[{candidate:{slId:'A',zip:'00987'}}]);
  assert.equal(result.fieldMatches.zip,true);
 });
+
+test('compact ZIP+4 restores missing leading zeros before splitting the base', () => {
+ for (const [input,postal,base,zip3] of [
+  ['9877678','00987-7678','00987','009*'],
+  ['09877678','00987-7678','00987','009*'],
+  ['009877678','00987-7678','00987','009*'],
+  ['987-7678','00987-7678','00987','009*'],
+  ['123456','00012-3456','00012','000*'],
+  ['123456789','12345-6789','12345','123*']
+ ]) {
+  assert.equal(engine.normalizePostal(input),postal);
+  assert.equal(engine.normalizeZip(input),base);
+  assert.equal(engine.createZip3(input),zip3);
+ }
+ for (const invalid of ['1234567890','987-78','abc987','987-76789','12345-6789-0']) {
+  assert.equal(engine.normalizePostal(invalid),'');
+  assert.equal(engine.createZip3(invalid),'');
+ }
+});
