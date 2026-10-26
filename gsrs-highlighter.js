@@ -24,12 +24,26 @@ function phone(s){
 }
 function addressParts(s){
  // Ignore a business-name prefix, but keep route numbers and unit details.
+ let range=s.match(/(?:^|\s)(\d+)\s*[-–—]\s*(\d+)(?=\s|$)/);
+ if(range&&/\d/.test(s.slice(0,range.index)))range=null;
+ if(range)s=s.slice(0,range.index)+s.slice(range.index).replace(range[0],(range[0].startsWith(' ')?' ':'')+range[1]);
  const tokens=norm(s).split(' ').map(w=>words[w]||w),start=tokens.findIndex(w=>/^\d+[A-Z]?$/.test(w));
  if(start<0)return null;
  const rest=tokens.slice(start+1),unit=rest.indexOf('UNIT');
  const street=unit<0?rest:rest.slice(0,unit);
  const types=new Set(['ST','RD','AVE','BLVD','DR','LN','CT','CIR','TER','PL','PKWY','HWY','RTE','ROUT']);
- return {house:tokens[start],unit:unit<0?'':rest.slice(unit+1).join(' '),numbers:street.filter(w=>/\d/.test(w)).join(' '),core:street.filter(w=>!types.has(w))};
+ return {house:tokens[start],range:range?[Number(range[1]),Number(range[2])]:null,unit:unit<0?'':rest.slice(unit+1).join(' '),numbers:street.filter(w=>/\d/.test(w)).join(' '),core:street.filter(w=>!types.has(w))};
+}
+function compatibleHouse(a,b){
+ if(a.range||b.range){
+  if((a.range&&a.range[0]>a.range[1])||(b.range&&b.range[0]>b.range[1]))return false;
+  if(!/^\d+$/.test(a.house)||!/^\d+$/.test(b.house))return false;
+  const x=a.range||[Number(a.house),Number(a.house)],y=b.range||[Number(b.house),Number(b.house)];
+  return Math.max(x[0],y[0])<=Math.min(x[1],y[1]);
+ }
+ if(a.house===b.house)return true;
+ if(!/^\d+$/.test(a.house)||!/^\d+$/.test(b.house)||a.house.length!==b.house.length)return false;
+ return [...a.house].filter((digit,i)=>digit!==b.house[i]).length<=2;
 }
 function compare(p,c,f,context={}){
  if(blank(p)||blank(c))return null;
@@ -41,10 +55,10 @@ function compare(p,c,f,context={}){
   return expected&&expected!==area?'partial':'exact';
  }
  const a=canonical(p,f),b=canonical(c,f);if(!a||!b)return null;if(a===b)return 'exact';
- // Address numbers must agree; missing descriptive words can be Partial.
+ // One/two changed door-number positions or overlapping ranges merit review.
  if(f===2){
   const a=addressParts(p),b=addressParts(c);
-  if(!a||!b||a.house!==b.house||a.unit!==b.unit||a.numbers!==b.numbers)return 'none';
+  if(!a||!b||!compatibleHouse(a,b)||a.unit!==b.unit||a.numbers!==b.numbers)return 'none';
   const small=a.core.length<=b.core.length?a.core:b.core,big=small===a.core?b.core:a.core;
   return small.some(w=>/^[A-Z]{3,}$/.test(w)&&!['NORTH','SOUTH','EAST','WEST'].includes(w))&&small.every(w=>big.includes(w))?'partial':'none';
  }
