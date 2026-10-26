@@ -39,7 +39,7 @@ Exact / green:
 - Standardize common street suffixes/directions and apartment/suite abbreviations.
 - Recognize US state code, full name, and [code] name representations.
 Partial / amber (called moderate for addresses):
-- Same house number and street name with missing direction or descriptive words. One or two changed door-number digit positions, or overlapping door-number ranges, are amber when the street matches. Other door-number differences remain red.
+- Same house number and street name with missing direction or descriptive words. Door numbers up to 10 apart, or overlapping door-number ranges, are amber when the street matches. Other door-number differences remain red.
 - Store/city name has whole-word containment with at least three compact characters.
 - US five-digit ZIP matches the prefix of a nine-digit ZIP.
 No Match / red: other nonblank differences.
