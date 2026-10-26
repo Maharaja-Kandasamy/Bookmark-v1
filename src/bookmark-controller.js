@@ -12,9 +12,11 @@
     let extraction = null;
     let destroyed = false;
     let revision = 0;
+    let completionAborter = null;
     const signature = found => JSON.stringify([found?.profile, found?.source || null]);
     function invalidate() {
       revision++;
+      completionAborter?.abort();
       runner?.cancel?.();
       runner = null;
     }
@@ -48,17 +50,17 @@
       invalidate();
       extraction = null;
       if (found?.error) {
-        store.set({ status: 'error', diagnostic: 'You need to be in the Manual screen to activate me.', diagnosticCode: found.error, source: null, results: [], initialCandidates: [], observations: [], plan: [], progress: 0, total: 0, activeQuery: null });
+        store.set({ status: 'error', diagnostic: 'You need to be in the Manual screen to activate me.', diagnosticCode: found.error, source: null, results: [], linksSearch: null, tdIds: [], initialCandidates: [], observations: [], plan: [], progress: 0, total: 0, activeQuery: null });
         return found;
       }
       extraction = found;
-      store.set({ status: 'ready', profile: found.profile, source: { ...found.source, zip: Engine.normalizeZip(found.source.zip) }, initialCandidates: found.candidates || [], sourceRowCount: found.sourceRowCount, initialCandidateCount: found.initialCandidateCount, results: [], observations: [], plan: [], progress: 0, total: 0, activeQuery: null, diagnostic: '', diagnosticCode: '' });
+      store.set({ status: 'ready', profile: found.profile, source: { ...found.source, zip: Engine.normalizeZip(found.source.zip) }, initialCandidates: found.candidates || [], sourceRowCount: found.sourceRowCount, initialCandidateCount: found.initialCandidateCount, results: [], linksSearch: null, tdIds: [], observations: [], plan: [], progress: 0, total: 0, activeQuery: null, diagnostic: '', diagnosticCode: '' });
       return found;
     }
 
     async function run(group = 'all') {
       if (destroyed) throw new Error('Bookmark was closed');
-      if (runner?.isActive?.()) throw new Error('A duplicate check is already active');
+      if (completionAborter || runner?.isActive?.()) throw new Error('A duplicate check is already active');
       scan();
       const runRevision = revision;
       const current = store.get();
@@ -72,7 +74,7 @@
       }
       runner = Runner.createRunController({
         adapter: (query, runOptions) => Adapter.execute(query, { ...runOptions, timeoutMs: 30000, stableMs: 1500, profile: current.profile }),
-        onState: state => { if (!destroyed && runRevision === revision) store.set(state); },
+        onState: state => { if (!destroyed && runRevision === revision) store.set(state.status === 'completed' ? {...state,status:'running'} : state); },
         queryTimeoutMs: 30000,
         runTimeoutMs: 180000,
         safetyDelayMs: 900
@@ -83,13 +85,30 @@
       const initial = (current.initialCandidates || []).map(candidate => ({ queryId: 'initial-table', candidate }));
       const searched = (runResult.observations || []).flatMap(observation => (observation.rows || []).map(candidate => ({ queryId: observation.queryId, candidate })));
       const results = Engine.consolidateCandidates(current.source, [...initial, ...searched]);
-      const result = { ...runResult, plan, results, activeQuery: null };
+      const tdIds = Engine.getTopTdIds ? Engine.getTopTdIds(results) : [];
+      let linksSearch = null;
+      if (runResult.status === 'completed' && tdIds.length) {
+        const aborter = new AbortController();
+        completionAborter = aborter;
+        store.set({status:'waiting',results,activeQuery:{label:'Links search: top ranked TDs'},progress:plan.length,total:plan.length+1});
+        try {
+          linksSearch = await root.PickerBookmarkLinks.execute(tdIds,{profile:current.profile,signal:aborter.signal,timeoutMs:30000,stableMs:1500,
+            isCurrent:() => { refresh(); return !destroyed && revision === runRevision; }});
+        } finally { if(completionAborter === aborter)completionAborter = null; }
+        if (aborter.signal.aborted && linksSearch) linksSearch = {...linksSearch,status:'cancelled'};
+        refresh();
+        if (destroyed || runRevision !== revision) return {status:'cancelled',observations:[],results:[]};
+      }
+      const linksIncomplete = linksSearch && linksSearch.status !== 'complete';
+      const result = { ...runResult, plan, results, linksSearch, tdIds, activeQuery: null,
+        ...(linksSearch ? {status:linksSearch.status==='cancelled'?'cancelled':linksIncomplete?'incomplete':'completed',progress:plan.length+(linksIncomplete?0:1),total:plan.length+1,
+          diagnostic:linksIncomplete ? `Ranked results saved. Final Links search incomplete: ${linksSearch.diagnostic || 'Search did not finish'}. TDs: ${tdIds.join(',')}` : `Top ${tdIds.length} TDs searched in Links: ${tdIds.join(',')}`} : {}) };
       store.set(result);
       runner = null;
       return result;
     }
 
-    function cancel() { runner?.cancel?.(); }
+    function cancel() { runner?.cancel?.(); completionAborter?.abort(); }
     function pause() { runner?.pause?.(); }
     function resume() { runner?.resume?.(); }
     function openExternal(url) {
@@ -98,6 +117,7 @@
     function destroy() {
       if (destroyed) return;
       destroyed = true;
+      completionAborter?.abort();
       runner?.cancel?.();
       runner = null;
       lifecycle.dispose();

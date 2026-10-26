@@ -124,10 +124,17 @@
     const dialog = prepared.dialog;
     const search = evaluate(".//button[@data-testid='search-button'][.//span[normalize-space()='Search']]", dialog);
     if (!search) return { status: 'incomplete', rows: [], diagnostic: 'Visible Search button not found' };
-    const before = tableSignature(dialog);
-    const startedAt = Date.now();
     if (query.__pickerSubmitted) return { status:'incomplete', rows:[], diagnostic:'Search was already submitted for this query' };
     query.__pickerSubmitted = true;
+    return submitAndWait(dialog, search, options);
+  }
+
+  function submitAndWait(dialog, search, options = {}) {
+    const timeoutMs = options.timeoutMs || 30000;
+    const stableMs = options.stableMs || 1500;
+    if (options.signal?.aborted) return Promise.resolve({status:'incomplete',rows:[],diagnostic:'Search cancelled'});
+    const before = tableSignature(dialog);
+    const startedAt = Date.now();
     search.click();
     return new Promise(resolve => {
       let finished = false;
@@ -142,6 +149,7 @@
       };
       const check = () => {
         const liveDialog = findDialog();
+        if (options.isCurrent && !options.isCurrent()) return finish({ status: 'incomplete', rows: [], diagnostic: 'Source record changed' });
         if (!liveDialog) return finish({ status: 'incomplete', rows: [], diagnostic: 'Manual Match dialog closed during search' });
         const signature = tableSignature(liveDialog);
         const busy = !!liveDialog.querySelector('[aria-busy="true"], .MuiCircularProgress-root, [role="progressbar"]') || search.disabled;
@@ -193,5 +201,5 @@
     finally { restoreFields(snapshot); }
   }
 
-  return { FIELD_CONTROLS, PROFILE_CONTROLS, controlsForQuery, rowFromCells, findDialog, controlMatchesField, discoverControl, prepareQuery, extractRows, resultObservationRoot, isResultActivity, captureFields, restoreFields, execute };
+  return { FIELD_CONTROLS, PROFILE_CONTROLS, controlsForQuery, rowFromCells, findDialog, controlMatchesField, discoverControl, prepareQuery, extractRows, resultObservationRoot, isResultActivity, submitAndWait, setInputValue, captureFields, restoreFields, execute };
 });

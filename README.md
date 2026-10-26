@@ -59,3 +59,9 @@ After an update, replace your saved bookmark using the newly generated installat
 The compact buttons above the robot antenna are B (Banner), A (Address), P (Phone), S (Store number), and All. Banner runs exact and wildcard banner with ZIP3; Address runs wildcard address with city and ZIP3; Phone uses the last seven digits; Store uses store number with wildcard banner. Clicking any search minimizes the panel. Click the robot to reopen results.
 
 Automation keeps non-query search values, temporarily selects only the filters needed for the query, and restores the original values and checkbox selections after completion, cancellation, timeout, or failure. It does not restore an old record's search values after navigation to a different record.
+
+## ZIP+4 and final Links search
+
+Picker accepts five-digit ZIPs, ZIP+4 with a hyphen, and compact ZIP+4 values. Short base ZIPs are padded to five digits. Compact six-to-nine-digit values are treated as ZIP+4 with missing leading zeros: `9877678` becomes `00987-7678`, with `00987` for the base ZIP and `009*` for ZIP3 searches. Malformed formats are excluded from ZIP searches. This repairs formatting; it does not verify address deliverability.
+
+After a successful duplicate-search group, Picker takes up to five unique numeric TD IDs from the final ranking, preserves leading zeros, discovers the labelled Links control, TD input and Search button, and submits the IDs as a comma-separated list. Completion waits for this final search to settle. Missing or ambiguous controls leave ranked results available with an incomplete diagnostic and the TD list. Original search-field values are restored after the operation. Cancellation and source changes stop the final search.

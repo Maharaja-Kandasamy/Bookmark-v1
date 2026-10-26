@@ -155,6 +155,16 @@
     return [...grouped.values()].sort((a,b)=>Number(b.directMatch)-Number(a.directMatch)||b.score-a.score||String(a.candidate.slId||'').localeCompare(String(b.candidate.slId||'')));
   }
 
+  function getTopTdIds(results) {
+    const ids = [];
+    for (const item of results || []) {
+      const id = cleanText((item.candidate || item).slId);
+      if (/^\d+$/.test(id) && !ids.includes(id)) ids.push(id);
+      if (ids.length === 5) break;
+    }
+    return ids;
+  }
+
   const formatTdCopy = candidate => cleanText(candidate?.slId);
   const formatFullCopy = candidate => {
     const fields = candidate?.copyFields || [];
@@ -162,7 +172,7 @@
     return [['SL_ID',candidate?.slId],['SL_STORE_NAME',candidate?.bannerName],['SL_STORE_NUMBER',candidate?.storeNumber],['SL_PA_LINE1',candidate?.address],['SL_PA_CITY_NAME',candidate?.city],['SL_PA_STATE_CODE',candidate?.state],['SL_PA_POSTAL_CODE',candidate?.zip],['PHONE',candidate?.phone]].filter(([,v]) => cleanText(v)).map(([h,v]) => `${h}: ${cleanText(v)}`).join('\n');
   };
 
-  return { cleanText, normalizeWords, normalizeBanner, normalizeAddress, normalizePostal, normalizeZip, createZip3, wildcardWords, normalizeSource, createSearchPlan, consolidateCandidates, formatTdCopy, formatFullCopy };
+  return { cleanText, normalizeWords, normalizeBanner, normalizeAddress, normalizePostal, normalizeZip, createZip3, wildcardWords, normalizeSource, createSearchPlan, consolidateCandidates, getTopTdIds, formatTdCopy, formatFullCopy };
 });
 (function (root, factory) {
   const api = factory();
@@ -512,10 +522,17 @@
     const dialog = prepared.dialog;
     const search = evaluate(".//button[@data-testid='search-button'][.//span[normalize-space()='Search']]", dialog);
     if (!search) return { status: 'incomplete', rows: [], diagnostic: 'Visible Search button not found' };
-    const before = tableSignature(dialog);
-    const startedAt = Date.now();
     if (query.__pickerSubmitted) return { status:'incomplete', rows:[], diagnostic:'Search was already submitted for this query' };
     query.__pickerSubmitted = true;
+    return submitAndWait(dialog, search, options);
+  }
+
+  function submitAndWait(dialog, search, options = {}) {
+    const timeoutMs = options.timeoutMs || 30000;
+    const stableMs = options.stableMs || 1500;
+    if (options.signal?.aborted) return Promise.resolve({status:'incomplete',rows:[],diagnostic:'Search cancelled'});
+    const before = tableSignature(dialog);
+    const startedAt = Date.now();
     search.click();
     return new Promise(resolve => {
       let finished = false;
@@ -530,6 +547,7 @@
       };
       const check = () => {
         const liveDialog = findDialog();
+        if (options.isCurrent && !options.isCurrent()) return finish({ status: 'incomplete', rows: [], diagnostic: 'Source record changed' });
         if (!liveDialog) return finish({ status: 'incomplete', rows: [], diagnostic: 'Manual Match dialog closed during search' });
         const signature = tableSignature(liveDialog);
         const busy = !!liveDialog.querySelector('[aria-busy="true"], .MuiCircularProgress-root, [role="progressbar"]') || search.disabled;
@@ -581,7 +599,7 @@
     finally { restoreFields(snapshot); }
   }
 
-  return { FIELD_CONTROLS, PROFILE_CONTROLS, controlsForQuery, rowFromCells, findDialog, controlMatchesField, discoverControl, prepareQuery, extractRows, resultObservationRoot, isResultActivity, captureFields, restoreFields, execute };
+  return { FIELD_CONTROLS, PROFILE_CONTROLS, controlsForQuery, rowFromCells, findDialog, controlMatchesField, discoverControl, prepareQuery, extractRows, resultObservationRoot, isResultActivity, submitAndWait, setInputValue, captureFields, restoreFields, execute };
 });
 (function(root,factory){const api=factory();if(typeof module==='object'&&module.exports)module.exports=api;if(root)root.PickerBotLayout=api;})(typeof globalThis!=='undefined'?globalThis:this,function(){
   const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
@@ -675,6 +693,86 @@
   }
   root.PickerBookmarkLifecycle = { create };
 })(typeof globalThis !== 'undefined' ? globalThis : this);
+(function(root) {
+  const norm = value => String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const visible = element => !!element?.getClientRects().length && !element.closest('[hidden],[aria-hidden="true"]');
+  function labels(element) {
+    const doc = element.ownerDocument;
+    return [element.getAttribute('aria-label'), element.getAttribute('placeholder'), element.getAttribute('name'), element.getAttribute('id'),
+      ...(element.labels ? [...element.labels].map(label => label.textContent) : []),
+      ...(element.getAttribute('aria-labelledby') || '').split(/\s+/).map(id => doc.getElementById(id)?.textContent)
+    ].filter(Boolean).map(norm);
+  }
+  function findTdField(dialog) {
+    const aliases = ['td','tds','tdlinxnumber','tdlinxnumbers','tdid','tdids','tdnumber','tdnumbers','tdlinx','tdlinxid','tdlinxids','slid','slids','linkstd','tdlinks'];
+    const matches = [...dialog.querySelectorAll('input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]),textarea')]
+      .filter(visible).filter(input => labels(input).some(label => aliases.includes(label.replace(/(?:textfield|input)$/,''))));
+    if (matches.length !== 1) return { error: matches.length ? 'Multiple TD fields found in Links search' : 'TD field not found in Links search' };
+    const input = matches[0];
+    const group = input.closest('.horizontalPanelMM,.form-group,[role="group"],.MuiGrid-container') || input.parentElement;
+    const checkboxes = [...group.querySelectorAll('input[type="checkbox"]')].filter(visible);
+    return { input, checkbox: checkboxes.length === 1 ? checkboxes[0] : null };
+  }
+  function findLinksControl(dialog) {
+    const matches = [...dialog.querySelectorAll('button,a,[role="tab"],[role="radio"],input[type="checkbox"],input[type="radio"]')].filter(visible)
+      .filter(el => [...labels(el), norm(el.textContent)].some(value => ['links','linksearch','linkssearch'].includes(value)));
+    return matches.length === 1 ? { control: matches[0] } : { error: matches.length ? 'Multiple Links controls found' : 'Links control not found' };
+  }
+  async function execute(ids, options = {}) {
+    const Adapter = root.PickerManualMatchAdapter;
+    const value = ids.join(',');
+    if (!ids.length || ids.length > 5 || ids.some(id => !/^\d+$/.test(id))) return { status:'incomplete',diagnostic:'No valid top TD IDs available',value };
+    const dialog = Adapter.findDialog();
+    if (!dialog) return { status:'incomplete',diagnostic:'Manual Match dialog not open for Links search',value };
+    const snapshot = Adapter.captureFields(options.profile);
+    let mode = null, modeChecked, field = null, previousValue, previousChecked;
+    const priorTd = findTdField(dialog);
+    const priorTdValue = priorTd.input?.value;
+    const priorTdChecked = priorTd.checkbox?.checked;
+    const current = () => !options.signal?.aborted && (!options.isCurrent || options.isCurrent()) && Adapter.findDialog() === dialog;
+    try {
+      const foundMode = findLinksControl(dialog);
+      if (foundMode.error) return { status:'incomplete',diagnostic:foundMode.error,value };
+      mode = foundMode.control;
+      modeChecked = typeof mode.checked === 'boolean' ? mode.checked : undefined;
+      if (!current()) return {status:'incomplete',diagnostic:'Links search cancelled',value};
+      if (modeChecked !== true && mode.getAttribute('aria-selected') !== 'true' && mode.getAttribute('aria-checked') !== 'true') mode.click();
+      const deadline = Date.now() + (options.discoveryTimeoutMs || 5000);
+      let found;
+      do {
+        if (!current()) return {status:'incomplete',diagnostic:'Links search cancelled or source changed',value};
+        found = findTdField(dialog);
+        if (found.input || /Multiple/.test(found.error)) break;
+        await new Promise(resolve => setTimeout(resolve,100));
+      } while (Date.now() < deadline);
+      if (found.error) return {status:'incomplete',diagnostic:found.error,value};
+      field = found; previousValue = field.input === priorTd.input ? priorTdValue : field.input.value; previousChecked = field.checkbox === priorTd.checkbox ? priorTdChecked : field.checkbox?.checked;
+      // Isolate the final query while retaining the user's original filter values.
+      snapshot?.fields.forEach(({checkbox}) => {if(checkbox?.checked && checkbox !== mode && checkbox !== field.checkbox)checkbox.click();});
+      snapshot?.fields.forEach(({input,value:original}) => {if(input && input !== field.input && input.value !== original)Adapter.setInputValue(input,original);});
+      if (field.checkbox && !field.checkbox.checked) field.checkbox.click();
+      Adapter.setInputValue(field.input,value);
+      if (field.input.value !== value) return {status:'incomplete',diagnostic:'TD list was not accepted by Links search',value};
+      const searches = [...dialog.querySelectorAll('button,input[type="submit"],[role="button"]')].filter(visible)
+        .filter(el => !el.disabled && ['search','searchlinks','linkssearch'].includes(norm(el.getAttribute('aria-label') || el.textContent || el.value)));
+      if (searches.length !== 1) return {status:'incomplete',diagnostic:searches.length?'Multiple Search buttons found in Links search':'Links Search button not found',value};
+      if (!current()) return {status:'incomplete',diagnostic:'Links search cancelled or source changed',value};
+      const result = await Adapter.submitAndWait(dialog,searches[0],options);
+      return {...result,value,tdIds:[...ids]};
+    } catch (error) {
+      return {status:'incomplete',diagnostic:`Links search failed: ${error.message}`,value};
+    } finally {
+      const sameSource = !snapshot?.identity || Adapter.captureFields(options.profile)?.identity === snapshot.identity;
+      if (sameSource && Adapter.findDialog() === dialog) {
+        if(field?.checkbox?.isConnected && field.checkbox.checked !== previousChecked)field.checkbox.click();
+        if(mode?.isConnected && modeChecked !== undefined && mode.checked !== modeChecked)mode.click();
+        Adapter.restoreFields(snapshot);
+        if(field?.input?.isConnected && field.input.value !== previousValue)Adapter.setInputValue(field.input,previousValue);
+      }
+    }
+  }
+  root.PickerBookmarkLinks = { findTdField, findLinksControl, execute };
+})(typeof globalThis !== 'undefined' ? globalThis : this);
 (function (root) {
   function create(options) {
     const doc = options.document;
@@ -689,9 +787,11 @@
     let extraction = null;
     let destroyed = false;
     let revision = 0;
+    let completionAborter = null;
     const signature = found => JSON.stringify([found?.profile, found?.source || null]);
     function invalidate() {
       revision++;
+      completionAborter?.abort();
       runner?.cancel?.();
       runner = null;
     }
@@ -725,17 +825,17 @@
       invalidate();
       extraction = null;
       if (found?.error) {
-        store.set({ status: 'error', diagnostic: 'You need to be in the Manual screen to activate me.', diagnosticCode: found.error, source: null, results: [], initialCandidates: [], observations: [], plan: [], progress: 0, total: 0, activeQuery: null });
+        store.set({ status: 'error', diagnostic: 'You need to be in the Manual screen to activate me.', diagnosticCode: found.error, source: null, results: [], linksSearch: null, tdIds: [], initialCandidates: [], observations: [], plan: [], progress: 0, total: 0, activeQuery: null });
         return found;
       }
       extraction = found;
-      store.set({ status: 'ready', profile: found.profile, source: { ...found.source, zip: Engine.normalizeZip(found.source.zip) }, initialCandidates: found.candidates || [], sourceRowCount: found.sourceRowCount, initialCandidateCount: found.initialCandidateCount, results: [], observations: [], plan: [], progress: 0, total: 0, activeQuery: null, diagnostic: '', diagnosticCode: '' });
+      store.set({ status: 'ready', profile: found.profile, source: { ...found.source, zip: Engine.normalizeZip(found.source.zip) }, initialCandidates: found.candidates || [], sourceRowCount: found.sourceRowCount, initialCandidateCount: found.initialCandidateCount, results: [], linksSearch: null, tdIds: [], observations: [], plan: [], progress: 0, total: 0, activeQuery: null, diagnostic: '', diagnosticCode: '' });
       return found;
     }
 
     async function run(group = 'all') {
       if (destroyed) throw new Error('Bookmark was closed');
-      if (runner?.isActive?.()) throw new Error('A duplicate check is already active');
+      if (completionAborter || runner?.isActive?.()) throw new Error('A duplicate check is already active');
       scan();
       const runRevision = revision;
       const current = store.get();
@@ -749,7 +849,7 @@
       }
       runner = Runner.createRunController({
         adapter: (query, runOptions) => Adapter.execute(query, { ...runOptions, timeoutMs: 30000, stableMs: 1500, profile: current.profile }),
-        onState: state => { if (!destroyed && runRevision === revision) store.set(state); },
+        onState: state => { if (!destroyed && runRevision === revision) store.set(state.status === 'completed' ? {...state,status:'running'} : state); },
         queryTimeoutMs: 30000,
         runTimeoutMs: 180000,
         safetyDelayMs: 900
@@ -760,13 +860,30 @@
       const initial = (current.initialCandidates || []).map(candidate => ({ queryId: 'initial-table', candidate }));
       const searched = (runResult.observations || []).flatMap(observation => (observation.rows || []).map(candidate => ({ queryId: observation.queryId, candidate })));
       const results = Engine.consolidateCandidates(current.source, [...initial, ...searched]);
-      const result = { ...runResult, plan, results, activeQuery: null };
+      const tdIds = Engine.getTopTdIds ? Engine.getTopTdIds(results) : [];
+      let linksSearch = null;
+      if (runResult.status === 'completed' && tdIds.length) {
+        const aborter = new AbortController();
+        completionAborter = aborter;
+        store.set({status:'waiting',results,activeQuery:{label:'Links search: top ranked TDs'},progress:plan.length,total:plan.length+1});
+        try {
+          linksSearch = await root.PickerBookmarkLinks.execute(tdIds,{profile:current.profile,signal:aborter.signal,timeoutMs:30000,stableMs:1500,
+            isCurrent:() => { refresh(); return !destroyed && revision === runRevision; }});
+        } finally { if(completionAborter === aborter)completionAborter = null; }
+        if (aborter.signal.aborted && linksSearch) linksSearch = {...linksSearch,status:'cancelled'};
+        refresh();
+        if (destroyed || runRevision !== revision) return {status:'cancelled',observations:[],results:[]};
+      }
+      const linksIncomplete = linksSearch && linksSearch.status !== 'complete';
+      const result = { ...runResult, plan, results, linksSearch, tdIds, activeQuery: null,
+        ...(linksSearch ? {status:linksSearch.status==='cancelled'?'cancelled':linksIncomplete?'incomplete':'completed',progress:plan.length+(linksIncomplete?0:1),total:plan.length+1,
+          diagnostic:linksIncomplete ? `Ranked results saved. Final Links search incomplete: ${linksSearch.diagnostic || 'Search did not finish'}. TDs: ${tdIds.join(',')}` : `Top ${tdIds.length} TDs searched in Links: ${tdIds.join(',')}`} : {}) };
       store.set(result);
       runner = null;
       return result;
     }
 
-    function cancel() { runner?.cancel?.(); }
+    function cancel() { runner?.cancel?.(); completionAborter?.abort(); }
     function pause() { runner?.pause?.(); }
     function resume() { runner?.resume?.(); }
     function openExternal(url) {
@@ -775,6 +892,7 @@
     function destroy() {
       if (destroyed) return;
       destroyed = true;
+      completionAborter?.abort();
       runner?.cancel?.();
       runner = null;
       lifecycle.dispose();

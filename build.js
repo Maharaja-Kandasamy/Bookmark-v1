@@ -11,6 +11,7 @@ const inputs = [
   'vendor/bot-layout.js',
   'src/bookmark-store.js',
   'src/bookmark-lifecycle.js',
+  'src/bookmark-links.js',
   'src/bookmark-controller.js',
   'src/bookmark-robot.js',
   'src/bookmark-bot.js',

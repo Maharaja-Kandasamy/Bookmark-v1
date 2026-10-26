@@ -61,3 +61,9 @@ test('compact ZIP+4 restores missing leading zeros before splitting the base', (
   assert.equal(engine.createZip3(invalid),'');
  }
 });
+
+test('top TD list takes ranked unique IDs and preserves leading zeros',()=>{
+ const ranked=['7867788','0067788','7867788','1234567','7654321','2345678','9999999'].map(slId=>({candidate:{slId}}));
+ assert.deepEqual(engine.getTopTdIds(ranked),['7867788','0067788','1234567','7654321','2345678']);
+ assert.deepEqual(engine.getTopTdIds([{candidate:{slId:'not-a-td'}},{candidate:{slId:'0000012'}}]),['0000012']);
+});

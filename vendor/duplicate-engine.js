@@ -154,6 +154,16 @@
     return [...grouped.values()].sort((a,b)=>Number(b.directMatch)-Number(a.directMatch)||b.score-a.score||String(a.candidate.slId||'').localeCompare(String(b.candidate.slId||'')));
   }
 
+  function getTopTdIds(results) {
+    const ids = [];
+    for (const item of results || []) {
+      const id = cleanText((item.candidate || item).slId);
+      if (/^\d+$/.test(id) && !ids.includes(id)) ids.push(id);
+      if (ids.length === 5) break;
+    }
+    return ids;
+  }
+
   const formatTdCopy = candidate => cleanText(candidate?.slId);
   const formatFullCopy = candidate => {
     const fields = candidate?.copyFields || [];
@@ -161,5 +171,5 @@
     return [['SL_ID',candidate?.slId],['SL_STORE_NAME',candidate?.bannerName],['SL_STORE_NUMBER',candidate?.storeNumber],['SL_PA_LINE1',candidate?.address],['SL_PA_CITY_NAME',candidate?.city],['SL_PA_STATE_CODE',candidate?.state],['SL_PA_POSTAL_CODE',candidate?.zip],['PHONE',candidate?.phone]].filter(([,v]) => cleanText(v)).map(([h,v]) => `${h}: ${cleanText(v)}`).join('\n');
   };
 
-  return { cleanText, normalizeWords, normalizeBanner, normalizeAddress, normalizePostal, normalizeZip, createZip3, wildcardWords, normalizeSource, createSearchPlan, consolidateCandidates, formatTdCopy, formatFullCopy };
+  return { cleanText, normalizeWords, normalizeBanner, normalizeAddress, normalizePostal, normalizeZip, createZip3, wildcardWords, normalizeSource, createSearchPlan, consolidateCandidates, getTopTdIds, formatTdCopy, formatFullCopy };
 });

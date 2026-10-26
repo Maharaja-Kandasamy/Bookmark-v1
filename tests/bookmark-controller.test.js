@@ -129,3 +129,33 @@ test('source ZIP displayed by the bot is corrected without changing the extracte
  assert.equal(store.get().source.zip,'00987');
  assert.equal(source.zip,'987-7678');
 });
+
+test('final Links search is awaited before completing and retains ranked results on discovery failure',async()=>{
+ for(const status of ['complete','incomplete']){
+ let submitted;
+ const {controller,store}=setup({
+ PickerDuplicateEngine:{normalizeZip:require('../vendor/duplicate-engine').normalizeZip,createSearchPlan:()=>[{id:'one'}],consolidateCandidates:()=>[{candidate:{slId:'0067788'}}],getTopTdIds:()=>['0067788']},
+ PickerBookmarkLinks:{execute:async ids=>{submitted=ids;assert.equal(store.get().status,'waiting');return {status,diagnostic:status==='incomplete'?'TD field not found':''};}}
+ });
+ const result=await controller.run();
+ assert.deepEqual(Array.from(submitted),['0067788']);
+ assert.equal(result.status,status==='complete'?'completed':'incomplete');
+ assert.equal(result.results.length,1);
+ assert.equal(result.total,2);
+ }
+});
+
+test('cancel stops the final Links step without reporting completion',async()=>{
+ let started;
+ const ready=new Promise(resolve=>{started=resolve;});
+ const {controller}=setup({
+  PickerDuplicateEngine:{normalizeZip:require('../vendor/duplicate-engine').normalizeZip,createSearchPlan:()=>[{id:'one'}],consolidateCandidates:()=>[{candidate:{slId:'0067788'}}],getTopTdIds:()=>['0067788']},
+  PickerBookmarkLinks:{execute:(_ids,{signal})=>new Promise(resolve=>{signal.addEventListener('abort',()=>resolve({status:'incomplete',diagnostic:'Search cancelled'}));started();})}
+ });
+ const running=controller.run();
+ await ready;
+ controller.cancel();
+ const result=await running;
+ assert.equal(result.status,'cancelled');
+ assert.equal(result.results.length,1);
+});
