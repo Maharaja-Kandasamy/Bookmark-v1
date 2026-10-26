@@ -704,7 +704,7 @@
     ].filter(Boolean).map(norm);
   }
   function findTdField(dialog) {
-    const aliases = ['td','tds','tdlinxnumber','tdlinxnumbers','tdid','tdids','tdnumber','tdnumbers','tdlinx','tdlinxid','tdlinxids','slid','slids','linkstd','tdlinks'];
+    const aliases = ['tdlinxstorecode','td','tds','tdlinxnumber','tdlinxnumbers','tdid','tdids','tdnumber','tdnumbers','tdlinx','tdlinxid','tdlinxids','slid','slids','linkstd','tdlinks'];
     const matches = [...dialog.querySelectorAll('input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]),textarea')]
       .filter(visible).filter(input => labels(input).some(label => aliases.includes(label.replace(/(?:textfield|input)$/,''))));
     if (matches.length !== 1) return { error: matches.length ? 'Multiple TD fields found in Links search' : 'TD field not found in Links search' };
