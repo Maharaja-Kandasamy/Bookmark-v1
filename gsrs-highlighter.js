@@ -39,6 +39,11 @@ style.textContent=`
 #gsrs-visual-panel .gv-title{font-size:14px;font-weight:650;letter-spacing:-.02em}
 #gsrs-visual-panel .gv-hint{font-size:10px;color:#738079}
 #gsrs-visual-panel .gv-grip{margin-left:auto;color:#9ca7a0;font-size:20px}
+#gsrs-visual-panel[data-minimized]{width:250px}
+#gsrs-visual-panel[data-minimized] .gv-body{display:none}
+#gsrs-visual-panel[data-minimized] [data-drag]{border-bottom:0}
+#gsrs-visual-panel [data-drag]{padding-right:100px}
+#gsrs-visual-panel button[data-toggle]{position:absolute;right:12px;top:19px;padding:7px 9px}
 #gsrs-visual-panel .gv-body{padding:14px 18px 16px;overflow:auto;min-height:0}
 #gsrs-visual-panel .gv-legend{display:flex;gap:15px;color:#69766f;font-size:11px;margin-bottom:12px}
 #gsrs-visual-panel .gv-legend span:before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:5px;background:var(--dot)}
@@ -61,6 +66,15 @@ style.textContent=`
 document.head.append(style);
 const panel=document.createElement('aside');panel.id='gsrs-visual-panel';panel.setAttribute('aria-label','GSRS field comparison');
 panel.innerHTML='<div data-drag tabindex="0" role="button" aria-label="Move GSRS Visuals. Drag or use arrow keys; Shift moves faster."><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAUoSURBVFhHjVfdT1xFFOcfsU353M/7sbt3d6Egn4VKK5SwtLAUsRoSQ6oWbYNWaZTGYBVqE6m1Fm1ri6UJtSgtICFNY7QPJlYfePChsQ81EkhQ0UJZWPZnZu69e2fm3qXd5Je5c+bMOb9z5sy5d7M0Ta0sKg71hsNqbziq6qMTyJoJdi7qiPs2AfGbFQ4rA2XlhSgqDmF7sYbtdAwZc2vU1wSU6GMRs8+mk5brtlgQv1mECVEMRxSEI6oxOkFFJErWWR1zzoKVizZ4EFIGgRCz0a5oghCwSPC64pr+bK7b9cmcIWBmIBOsyHhHoo5dFjEgrhEbDhnIBMNx2pARJUNMdGCHuE4IaMgKheUnIJApxaxRcf54ZCQQiQYgyW4UuLbB5c6Gx5tryA3HJmwErGeSHV9IgickwR30Q9ZkRJwIOB0Bcd7eHsf4+BimvpvA8ePH4PXlZYichS4nzr0hCYdrn8ZE226Mte5Ca0UUsiZxexkCGle1eflbMTJyCeyv/fk43J5cmh07CYsYce7XZNSXhrHwSguWu1qBI8/hk1g18gN+hqhRAywB04gku9AYq8Py8r9YX1+lBO7e/Ql+qQAhkkrbdTScR1VoEYVGf6NtN/47FMf8yy2437kXtSUaFE3OTIA1QpCbtwVDQ2eo89XVh3Ts6elGfv7WTQm4gxLeqC1F6rX9WHo1jo3X29C3p4JGb9WAjYDYiFQoqgfFJRHMzf2BjY11pFJJPHhwH4VFQQSCPptjE25Vwpt1pbgQ34lzzTX4oKGS2gyF7bUi9AG2aegVT2qht7eHRp8wsjA4+BFy87eka4HCIOGS/Dj6YilmLzbizmd78PP5Bjxbq8GrSo7NSDgCq5hMhDQJiuLB7OyvAFJIJhP45+9FVFeXQVbcHAElKKO8NIjfh5uw9E0LVidaMXOyjso1h+iFIxBbMROVOxudnR2UQCKxTLNw9eowzQ5bCyT6z9+qwcqNVsyPNmPhWjNiuyLwKRKjxwe5aQ2wmwiJW7emqfO1tUdIJB5h774G+Pz5VEcKyKjfEcDclRjmR2J4+G0zznTXoMDv50haJGxHoNeASSCdWmOj15+HpqZ6JBIrlAD5zcxMocC9jeorqh/N+6rwTncjjh1pxKGOGoTDslF4lh0xyxmOgGdMn42CvHLlSz0LiRV6Kw68sB/Z2U+hPrYDF8Y/xNmvT+Di1CnEO5rg8zM1YtTJExNgiZiQFQ8qq0qwuLiAZHKNErnz4/dwuXPQd/owLk8O4NLNfgwMHaVFp5Gmw5293batE/KKPPtoNECbU/9An5GFZaSSSXx6fgBnR9/FF2PvY3jqJGLxWkiShyPPR66kiTl2QpYEl8KoikDQT6/mvXu/AakNbCTX8dfSnzh37T1cnuxHz4mDkGWv416eREYCdiXrtavPySu6q+ug3pzItUxt4IdfbuLjr95GeVURVNVnc64TsAI0ZZscgQ52IxuJ25OD27dnKAn9t4oDLzXB6y2wnKYd2r8dzMC4a2g5c8iCkFLyvbDzmQpcvz6K6elJnB48hWBQooXHOreCEu3qMlsfyLyBJxEtDEANeFHgyqZNyuXJoZVvZUnfbz0L0RvzDAREEgwZx3MVsiXYsOs5ZsCsAWdF1pipxxPhvxd5gpZd2h/SLyaHI2CdsdXPERKy8DjYA3IkwH8RpZ2Lo/CeMKMUZSJMGxYhXWa/BUzU3GYhO6KDtK6DjFtnM2wRUAZKy6J0kgnWP2cNxcY/YgrzmZUZOpyeI0Igfv8HMUsbjI7sLrgAAAAASUVORK5CYII=" alt=""><div><div class="gv-title">GSRS Visuals</div><div class="gv-hint">Field comparison · drag to move</div></div><span class="gv-grip" aria-hidden="true">⠿</span></div><div class="gv-body"><div class="gv-legend"><span style="--dot:#23815c">Exact</span><span style="--dot:#d5a33a">Partial</span><span style="--dot:#c15b54">No match</span></div><div data-summary></div><table><thead><tr><th>Field</th><th>Exact</th><th>Partial</th><th>No Match</th></tr></thead><tbody></tbody></table><div data-status role="status" aria-live="polite"></div><div class="gv-actions"><button data-refresh>Recheck</button><button data-size>Show 100</button><button data-close>Remove</button></div><div class="gv-footnote">Current page · child values only · blanks excluded</div></div>';
+panel.setAttribute('data-minimized','');
+const toggle=document.createElement('button');toggle.type='button';toggle.setAttribute('data-toggle','');toggle.setAttribute('aria-controls','gsrs-visual-details');toggle.setAttribute('aria-expanded','false');toggle.textContent='Expand';
+panel.querySelector('.gv-body').id='gsrs-visual-details';
+panel.append(toggle);
+toggle.addEventListener('click',()=>{
+ const minimized=panel.toggleAttribute('data-minimized');
+ toggle.setAttribute('aria-expanded',String(!minimized));toggle.textContent=minimized?'Expand':'Minimize';
+ keepPanelVisible();
+});
 document.body.append(panel);
 // Keep the handle reachable on small screens and after a viewport change.
 const dragHandle=panel.querySelector('[data-drag]');
