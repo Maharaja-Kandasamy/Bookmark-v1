@@ -39,7 +39,7 @@ Exact / green:
 - Standardize common street suffixes/directions and apartment/suite abbreviations.
 - Recognize US state code, full name, and [code] name representations.
 Partial / amber (called moderate for addresses):
-- Standardized address differs only in the leading house number.
+- Same house number and street name with missing direction or descriptive words. Different house numbers remain red.
 - Store/city name has whole-word containment with at least three compact characters.
 - US five-digit ZIP matches the prefix of a nine-digit ZIP.
 No Match / red: other nonblank differences.
@@ -69,3 +69,4 @@ if your managed browser blocks activation.
 RS and SL prefixes are detected dynamically, including underscore separators.
 Both phone columns compare the last seven digits after removing formatting, a US country code and extensions. Zeros are preserved. Parent area codes are checked against each child’s area code; local matches with area-code differences or missing area codes are partial.
 An extra business prefix or missing street words can produce a partial address match when the house number and core street name agree. Route and unit number differences remain red.
+
