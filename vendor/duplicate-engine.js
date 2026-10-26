@@ -72,8 +72,22 @@
     return [house,...words].filter(Boolean).join('*')+'*';
   }
 
+  function bannerSearchWords(value) {
+    const text = cleanText(value).replace(/<[^>]*>/g, ' ')
+      .replace(/&(?:[a-z]+|#\d+|#x[a-f0-9]+);/gi, ' ')
+      .replace(/\b(?:https?:\/\/|www\.)\S+/gi, ' ')
+      .replace(/\b[^\s@]+@[^\s@]+\.[^\s@]+\b/g, ' ')
+      .replace(/&/g, ' ');
+    const words = normalizeWords(text).split(' ').filter(word => word.length > 1 && !/^\d{7,}$/.test(word) && !['undefined','null','nan'].includes(word));
+    return normalizeBanner(words.join(' ')).split(' ').filter(word => word.length > 1);
+  }
+
   function wildcardWords(value, kind) {
     if (kind === 'address') return addressWildcard(value);
+    if (kind === 'banner') {
+      const words = bannerSearchWords(value);
+      return words.map(word => words.length === 1 ? word : word.slice(0,4)).join('*') + (words.length ? '*' : '');
+    }
     let words = (kind === 'address' ? normalizeAddress(value) : kind === 'banner' ? normalizeBanner(value) : normalizeWords(value)).split(' ').filter(Boolean);
     if (kind === 'address') words = words.filter(word => !addressNoise.has(word));
     return words.map((word, index) => {
@@ -111,7 +125,7 @@
     const bannerWildcard = wildcardWords(source.bannerName, 'banner');
     const addressWildcard = wildcardWords(source.address, 'address');
     const candidates = [
-      source.bannerKey && source.zip3 && { type: 'banner-exact-zip', label: 'Exact banner + ZIP3', fields: { banner: source.bannerKey, zip: source.zip3 } },
+      bannerWildcard && source.zip3 && { type: 'banner-exact-zip', label: 'Exact banner + ZIP3', fields: { banner: bannerSearchWords(source.bannerName).join(' '), zip: source.zip3 } },
       bannerWildcard && source.zip3 && { type: 'banner-wildcard-zip', label: 'Wildcard banner + ZIP3', fields: { banner: bannerWildcard, zip: source.zip3 } },
       addressWildcard && source.city && { type: 'address-city', label: 'Wildcard address + city', fields: { address: addressWildcard, city: source.city } },
       addressWildcard && source.zip3 && { type: 'address-zip', label: 'Wildcard address + ZIP3', fields: { address: addressWildcard, zip: source.zip3 } },
@@ -206,5 +220,5 @@
     return [['SL_ID',candidate?.slId],['SL_STORE_NAME',candidate?.bannerName],['SL_STORE_NUMBER',candidate?.storeNumber],['SL_PA_LINE1',candidate?.address],['SL_PA_CITY_NAME',candidate?.city],['SL_PA_STATE_CODE',candidate?.state],['SL_PA_POSTAL_CODE',candidate?.zip],['PHONE',candidate?.phone]].filter(([,v]) => cleanText(v)).map(([h,v]) => `${h}: ${cleanText(v)}`).join('\n');
   };
 
-  return { cleanText, normalizeWords, normalizeBanner, splitAddress, normalizeAddress, addressWildcard, normalizePostal, normalizeZip, createZip3, wildcardWords, normalizeSource, createSearchPlan, consolidateCandidates, getTopTdIds, formatTdCopy, formatFullCopy };
+  return { cleanText, normalizeWords, normalizeBanner, bannerSearchWords, splitAddress, normalizeAddress, addressWildcard, normalizePostal, normalizeZip, createZip3, wildcardWords, normalizeSource, createSearchPlan, consolidateCandidates, getTopTdIds, formatTdCopy, formatFullCopy };
 });

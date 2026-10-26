@@ -75,7 +75,7 @@ test('Wren example produces the confirmed primary street search and banner wildc
  assert.equal(engine.normalizeBanner('Wren S Nest Baking Co'),engine.normalizeBanner('Wrens Nest Baking'));
  assert.equal(engine.normalizeBanner("Wren's Nest Baking Co"),engine.normalizeBanner('Wrens Nest Baking'));
  const plan=engine.createSearchPlan({bannerName:'Wren S Nest Baking Co',address,city:'Ruston',zip:'98407'});
- assert.equal(plan.find(q=>q.type==='banner-exact-zip').fields.banner,'wrens nest baking');
+ assert.equal(plan.find(q=>q.type==='banner-exact-zip').fields.banner,'wren nest baking');
  for(const query of plan.filter(q=>q.fields.address))assert.equal(query.fields.address,'512*pea*');
 });
 
@@ -109,4 +109,23 @@ test('exact full address and unit ranks first while prefix-only house matches st
  assert.equal(results.find(x=>x.candidate.slId==='C').fieldMatches.address,undefined);
  assert.equal(engine.splitAddress(source.address).unitKey,'100');
  assert.equal(engine.normalizeAddress(source.address),'5121 n pearl st');
+});
+
+test('single-character banner tokens and special characters become clean wildcard separators',()=>{
+ for(const [raw,expected] of [
+  ['Circle K','circle*'],['Circle S','circle*'],['Circle @ K !!!','circle*'],
+  ['A Circle B','circle*'],['Circle & K','circle*'],['Circle-K','circle*'],
+  ['Acme & Foods @ LLC','acme*food*'],['Circle *** Market','circ*mark*'],
+  ['<b>Circle</b> &nbsp; K https://example.com null','circle*']
+ ]){
+  const actual=engine.wildcardWords(raw,'banner');assert.equal(actual,expected,raw);assert.doesNotMatch(actual,/\s|\*\*/);
+ }
+ for(const raw of ['K','A & B','!!!','LLC @ K','undefined null 5125551212']){
+  assert.equal(engine.wildcardWords(raw,'banner'),'');
+  assert.equal(engine.createSearchPlan({bannerName:raw,zip:'98407',storeNumber:'7'}).length,0);
+ }
+ const plan=engine.createSearchPlan({bannerName:'Circle @ K',zip:'98407',storeNumber:'7'});
+ assert.equal(plan.find(q=>q.type==='banner-exact-zip').fields.banner,'circle');
+ assert.equal(plan.find(q=>q.type==='banner-wildcard-zip').fields.banner,'circle*');
+ assert.equal(plan.find(q=>q.type==='store-banner').fields.banner,'circle*');
 });
