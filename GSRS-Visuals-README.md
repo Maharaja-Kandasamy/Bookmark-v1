@@ -10,6 +10,8 @@ Alternatively create a bookmark, edit its URL and paste ALL of gsrs-bookmarklet.
 The installer and readable source require no installation or dependencies.
 
 ## Use
+Supports both New Records and Change Records. Only the visible tab is compared.
+Change Records compares SL PHONE NUMBER and PHONE separately.
 Activation colours the child value blocks and adds one summary panel.
 Drag the panel header anywhere on screen. Tab to the header and use arrow keys
 (or Shift + arrow keys for larger steps) to move it with the keyboard.
