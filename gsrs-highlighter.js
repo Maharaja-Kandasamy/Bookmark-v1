@@ -70,6 +70,13 @@ style.textContent=`
 #gsrs-visual-panel button:hover{filter:brightness(.95)}#gsrs-visual-panel button:disabled{opacity:.5;cursor:wait}
 #gsrs-visual-panel :focus-visible{outline:2px solid #448667;outline-offset:-3px}
 #gsrs-visual-panel .gv-footnote{font-size:10px;color:#929b95;margin-top:12px}
+#gsrs-visual-panel .gv-window-controls{display:flex;gap:4px;flex-shrink:0}
+#gsrs-visual-panel .gv-window-controls button{width:40px;height:40px;padding:0;display:grid;place-items:center;font:22px/1 system-ui,sans-serif;border-radius:6px;background:#f7f9f7;border-color:#e4e9e5}
+#gsrs-visual-panel .gv-window-controls button[data-window-close]{color:#9e5049}
+#gsrs-visual-panel .gv-window-controls button[data-window-close]:hover{background:#fce9e7}
+#gsrs-visual-panel[data-minimized]{width:304px}
+#gsrs-visual-panel .gv-header{gap:8px}
+#gsrs-visual-panel .gv-hint{font-size:9px}
 `;
 document.head.append(style);
 const panel=document.createElement('aside');panel.id='gsrs-visual-panel';panel.setAttribute('aria-label','GSRS field comparison');
@@ -80,20 +87,28 @@ headerBar.append(panel.querySelector('[data-drag]'));panel.prepend(headerBar);
 const footerBar=document.createElement('div');footerBar.className='gv-footer';footerBar.hidden=true;panel.append(footerBar);
 const toggle=document.createElement('button');toggle.type='button';toggle.setAttribute('data-toggle','');toggle.setAttribute('aria-controls','gsrs-visual-details');toggle.setAttribute('aria-expanded','false');toggle.textContent='Expand';
 panel.querySelector('.gv-body').id='gsrs-visual-details';
-headerBar.append(toggle);
+const windowControls=document.createElement('div');windowControls.className='gv-window-controls';windowControls.setAttribute('role','group');windowControls.setAttribute('aria-label','Window controls');
+const closeControl=document.createElement('button');closeControl.type='button';closeControl.setAttribute('data-window-close','');closeControl.setAttribute('aria-label','Close GSRS Visuals and remove highlights');closeControl.title='Close GSRS Visuals and remove highlights';closeControl.textContent='×';closeControl.onclick=()=>remove();
+toggle.textContent='□';toggle.setAttribute('aria-label','Expand GSRS Visuals');toggle.title='Expand GSRS Visuals';
+windowControls.append(toggle,closeControl);headerBar.append(windowControls);
 let dockSide='right';
 function dockPanel(){
  const r=panel.getBoundingClientRect();
  movePanel(dockSide==='left'?16:window.innerWidth-r.width-16,window.innerHeight-r.height-16);
 }
-toggle.addEventListener('click',()=>{
+function setMinimized(minimized,restoreFocus=false){
  const r=panel.getBoundingClientRect();dockSide=r.left+r.width/2<window.innerWidth/2?'left':'right';
- const minimized=panel.toggleAttribute('data-minimized');
- toggle.setAttribute('aria-expanded',String(!minimized));toggle.textContent=minimized?'Expand':'Minimize';
+ panel.toggleAttribute('data-minimized',minimized);
+ toggle.setAttribute('aria-expanded',String(!minimized));toggle.textContent=minimized?'□':'−';toggle.setAttribute('aria-label',minimized?'Expand GSRS Visuals':'Minimize GSRS Visuals');toggle.title=minimized?'Expand GSRS Visuals':'Minimize GSRS Visuals';
  footerBar.hidden=minimized;
- (minimized?headerBar:footerBar).append(toggle);
+ (minimized?headerBar:footerBar).append(windowControls);
  dockPanel();
-});
+ if(restoreFocus)toggle.focus({preventScroll:true});
+}
+toggle.addEventListener('click',()=>setMinimized(!panel.hasAttribute('data-minimized'),true));
+const outsideClick=e=>{if(!panel.contains(e.target)&&!panel.hasAttribute('data-minimized'))setMinimized(true);};
+document.addEventListener('click',outsideClick);
+panel.addEventListener('keydown',e=>{if(e.key==='Escape'&&!panel.hasAttribute('data-minimized')){e.preventDefault();setMinimized(true,true);}});
 document.body.append(panel);
 // Keep the handle reachable on small screens and after a viewport change.
 const dragHandle=panel.querySelector('[data-drag]');
@@ -177,7 +192,7 @@ async function show100(){
 }
 const observer=new MutationObserver(()=>{if(busy||stopped)return;clearTimeout(timer);timer=setTimeout(refresh,300);});
 observer.observe(scope,{childList:true,subtree:true,characterData:true});
-function remove(){window.removeEventListener('resize',onPanelResize);window.removeEventListener('blur',endDrag);document.removeEventListener('pointermove',moveDrag);document.removeEventListener('pointerup',endDrag);document.removeEventListener('pointercancel',endDrag);drag=null;stopped=true;clearTimeout(timer);observer.disconnect();scope.querySelectorAll('[data-gsrs-match]').forEach(e=>e.removeAttribute('data-gsrs-match'));panel.remove();style.remove();delete window[key];}
+function remove(){document.removeEventListener('click',outsideClick);window.removeEventListener('resize',onPanelResize);window.removeEventListener('blur',endDrag);document.removeEventListener('pointermove',moveDrag);document.removeEventListener('pointerup',endDrag);document.removeEventListener('pointercancel',endDrag);drag=null;stopped=true;clearTimeout(timer);observer.disconnect();scope.querySelectorAll('[data-gsrs-match]').forEach(e=>e.removeAttribute('data-gsrs-match'));panel.remove();style.remove();delete window[key];}
 panel.querySelector('[data-size]').onclick=show100;panel.querySelector('[data-refresh]').onclick=refresh;panel.querySelector('[data-close]').onclick=remove;
 window[key]={refresh,remove};refresh();
 })();
