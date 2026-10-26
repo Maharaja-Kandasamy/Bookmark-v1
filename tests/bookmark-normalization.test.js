@@ -114,9 +114,9 @@ test('exact full address and unit ranks first while prefix-only house matches st
 test('single-character banner tokens and special characters become clean wildcard separators',()=>{
  for(const [raw,expected] of [
   ['Circle K','circle*'],['Circle S','circle*'],['Circle @ K !!!','circle*'],
-  ['A Circle B','circle*'],['Circle & K','circle*'],['Circle-K','circle*'],
+  ['A Circle B','*circle*'],['Circle & K','circle*'],['Circle-K','circle*'],
   ['Acme & Foods @ LLC','acme*food*'],['Circle *** Market','circ*mark*'],
-  ['<b>Circle</b> &nbsp; K https://example.com null','circle*']
+  ['<b>Circle</b> &nbsp; K https://example.com null','*circle*']
  ]){
   const actual=engine.wildcardWords(raw,'banner');assert.equal(actual,expected,raw);assert.doesNotMatch(actual,/\s|\*\*/);
  }
@@ -125,7 +125,7 @@ test('single-character banner tokens and special characters become clean wildcar
   assert.equal(engine.createSearchPlan({bannerName:raw,zip:'98407',storeNumber:'7'}).length,0);
  }
  const plan=engine.createSearchPlan({bannerName:'Circle @ K',zip:'98407',storeNumber:'7'});
- assert.equal(plan.find(q=>q.type==='banner-exact-zip').fields.banner,'circle');
+ assert.equal(plan.find(q=>q.type==='banner-wildcard-zip').fields.banner,'circle*');
  assert.equal(plan.find(q=>q.type==='banner-wildcard-zip').fields.banner,'circle*');
  assert.equal(plan.find(q=>q.type==='store-banner').fields.banner,'circle*');
 });
@@ -159,6 +159,15 @@ test('standalone and becomes one wildcard boundary while words containing and ar
  assert.equal(engine.wildcardWords('Candy','banner'),'candy*');
  assert.equal(engine.wildcardWords('and','banner'),'');
  const plan=engine.createSearchPlan({bannerName:'Bread and Butter',zip:'98407',storeNumber:'7'});
- assert.equal(plan.find(q=>q.type==='banner-exact-zip').fields.banner,'bread butter');
+ assert.equal(plan.find(q=>q.type==='banner-wildcard-zip').fields.banner,'brea*butt*');
  assert.equal(plan.find(q=>q.type==='store-banner').fields.banner,'brea*butt*');
+});
+
+test('numbers and removed prefixes keep their wildcard position in banner searches',()=>{
+ for(const [raw,expected] of [['7 Eleven','*eleven*'],['7Eleven','*eleven*'],['123 Eleven','*eleven*'],['@ Eleven','*eleven*'],['and Eleven','*eleven*'],['Eleven 123','eleven*'],['Bread 123 Butter','brea*butt*'],['123','']])assert.equal(engine.wildcardWords(raw,'banner'),expected,raw);
+ const plan=engine.createSearchPlan({bannerName:'7 Eleven',zip:'98407',storeNumber:'7'});
+ const bannerQueries=plan.filter(q=>q.fields.banner);
+ assert.ok(bannerQueries.length);
+ bannerQueries.forEach(query=>assert.equal(query.fields.banner,'*eleven*'));
+ assert.equal(plan.filter(q=>q.fields.zip).length,1);
 });

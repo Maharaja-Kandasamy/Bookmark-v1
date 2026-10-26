@@ -83,6 +83,7 @@
       .replace(/&(?:[a-z]+|#\d+|#x[a-f0-9]+);/gi, ' ')
       .replace(/\b(?:https?:\/\/|www\.)\S+/gi, ' ')
       .replace(/\b[^\s@]+@[^\s@]+\.[^\s@]+\b/g, ' ')
+      .replace(/\d+/g, ' ')
       .replace(/&/g, ' ');
     const words = normalizeWords(text).split(' ').filter(word => word.length > 1 && !/^\d{7,}$/.test(word) && !['undefined','null','nan','and'].includes(word));
     return normalizeBanner(words.join(' ')).split(' ').filter(word => word.length > 1);
@@ -92,7 +93,10 @@
     if (kind === 'address') return addressWildcard(value);
     if (kind === 'banner') {
       const words = bannerSearchWords(value);
-      return words.map(word => words.length === 1 ? word : word.slice(0,4)).join('*') + (words.length ? '*' : '');
+      if (!words.length) return '';
+      const firstIndex = cleanText(value).toLowerCase().indexOf(words[0]);
+      const leading = firstIndex > 0 && cleanText(value).slice(0,firstIndex).trim() ? '*' : '';
+      return leading + words.map(word => words.length === 1 ? word : word.slice(0,4)).join('*') + '*';
     }
     let words = (kind === 'address' ? normalizeAddress(value) : kind === 'banner' ? normalizeBanner(value) : normalizeWords(value)).split(' ').filter(Boolean);
     if (kind === 'address') words = words.filter(word => !addressNoise.has(word));
@@ -134,8 +138,9 @@
     const source = normalizeSource(raw);
     const bannerWildcard = wildcardWords(source.bannerName, 'banner');
     const addressWildcard = wildcardWords(source.address, 'address');
+    const bannerNeedsWildcard = /[0-9]|[^a-z0-9\s]|\band\b/i.test(source.bannerName);
     const candidates = [
-      bannerWildcard && source.zip3 && { type: 'banner-exact-zip', label: 'Exact banner + ZIP3', fields: { banner: bannerSearchWords(source.bannerName).join(' '), zip: source.zip3 } },
+      !bannerNeedsWildcard && bannerWildcard && source.zip3 && { type: 'banner-exact-zip', label: 'Exact banner + ZIP3', fields: { banner: bannerSearchWords(source.bannerName).join(' '), zip: source.zip3 } },
       bannerWildcard && source.zip3 && { type: 'banner-wildcard-zip', label: 'Wildcard banner + ZIP3', fields: { banner: bannerWildcard, zip: source.zip3 } },
       addressWildcard && source.city && { type: 'address-city', label: 'Wildcard address + city', fields: { address: addressWildcard, city: source.city } },
       addressWildcard && source.zip3 && { type: 'address-zip', label: 'Wildcard address + ZIP3', fields: { address: addressWildcard, zip: source.zip3 } },
