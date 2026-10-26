@@ -129,3 +129,25 @@ test('single-character banner tokens and special characters become clean wildcar
  assert.equal(plan.find(q=>q.type==='banner-wildcard-zip').fields.banner,'circle*');
  assert.equal(plan.find(q=>q.type==='store-banner').fields.banner,'circle*');
 });
+
+test('store number is inferred from a single banner hashtag only when the field is blank',()=>{
+ for(const bannerName of ['Circle K #00123','Circle K # 00123','Circle K #00123 #00123']){
+  const source=engine.normalizeSource({bannerName,storeNumber:' '});
+  assert.equal(source.storeNumber,'00123');assert.equal(source.storeNumberInferred,true);
+  const query=engine.createSearchPlan({bannerName}).find(q=>q.type==='store-banner');
+  assert.equal(query.fields.storeNumber,'00123');assert.equal(query.fields.banner,'circle*');
+ }
+ const explicit=engine.normalizeSource({bannerName:'Circle K #00123',storeNumber:'99'});
+ assert.equal(explicit.storeNumber,'99');assert.equal(explicit.storeNumberInferred,false);
+ assert.equal(engine.normalizeSource({bannerName:'Circle K #123 #456'}).storeNumber,'');
+ assert.equal(engine.normalizeSource({bannerName:'Circle K #123A'}).storeNumber,'');
+ assert.equal(engine.normalizeSource({bannerName:'Circle K #123',storeNumber:0}).storeNumber,'0');
+ assert.equal(engine.normalizeBanner('Circle K #123'),engine.normalizeBanner('Circle K'));
+});
+
+test('human-readable match explanations include specific unit conflicts',()=>{
+ const source={bannerName:'Wrens Nest Baking',address:'5121 N Pearl St #100'};
+ const ranked=engine.consolidateCandidates(source,[{candidate:{slId:'1',bannerName:'Wrens Nest Baking',address:'5121 N Pearl St #100'}},{candidate:{slId:'2',bannerName:'Wrens Nest Baking',address:'5121 N Pearl St #200'}}]);
+ assert.match(engine.explainCandidate(source,ranked[0]).summary,/Same address and unit; Same business name/);
+ assert.deepEqual(engine.explainCandidate(source,ranked[1]).conflicts,['Different unit: 200 instead of 100']);
+});

@@ -11,7 +11,7 @@
     ['west', 'w'], ['east', 'e'], ['north', 'n'], ['south', 's']
   ]);
 
-  const cleanText = value => String(value || '').trim().replace(/\s+/g, ' ');
+  const cleanText = value => String(value ?? '').trim().replace(/\s+/g, ' ');
   const normalizeWords = value => cleanText(value).toLowerCase()
     .replace(/&/g, ' and ').replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
   function splitAddress(value) {
@@ -23,7 +23,12 @@
   const normalizeAddress = value => normalizeWords(splitAddress(value).base).split(' ')
     .filter(Boolean).map(token => suffixes.get(token) || token).join(' ').trim();
   const addressNoise = new Set('street st road rd avenue ave av boulevard blvd drive dr lane ln highway hwy route rte court ct circle cir place pl terrace ter parkway pkwy way trail trl square sq expressway expy junction jct mount mt mountain mtn fort ft saint west w east e north n south s northeast ne northwest nw southeast se southwest sw'.split(' '));
-  const normalizeBanner = value => normalizeWords(cleanText(value).replace(/([a-z0-9])['\u2019]s\b/gi, '$1s'))
+  function inferStoreNumber(value) {
+    const numbers = [...new Set([...cleanText(value).matchAll(/#\s*(\d+)(?![\da-z-])/gi)].map(match => match[1]))];
+    return numbers.length === 1 ? numbers[0] : '';
+  }
+  const withoutBannerStoreNumber = value => cleanText(value).replace(/#\s*\d+(?![\da-z-])/gi, ' ');
+  const normalizeBanner = value => normalizeWords(withoutBannerStoreNumber(value).replace(/([a-z0-9])['\u2019]s\b/gi, '$1s'))
     .replace(/\b(?:l\s+l\s+c|l\s+t\s+d|i\s+n\s+c)\b/g, ' ')
     .replace(/\b([a-z0-9]+)\s+s\b/g, '$1s')
     .split(' ').filter(word => word && !['limited','ltd','inc','incorporated','llc','llp','plc','corp','corporation','co','company'].includes(word)).join(' ');
@@ -73,7 +78,7 @@
   }
 
   function bannerSearchWords(value) {
-    const text = cleanText(value).replace(/<[^>]*>/g, ' ')
+    const text = withoutBannerStoreNumber(value).replace(/<[^>]*>/g, ' ')
       .replace(/&(?:[a-z]+|#\d+|#x[a-f0-9]+);/gi, ' ')
       .replace(/\b(?:https?:\/\/|www\.)\S+/gi, ' ')
       .replace(/\b[^\s@]+@[^\s@]+\.[^\s@]+\b/g, ' ')
@@ -100,6 +105,9 @@
   function normalizeSource(raw) {
     const combinedPhone = `${raw.areaCode || ''}${raw.phone || ''}`;
     const phoneDigits = digits(combinedPhone);
+    const explicitStoreNumber = cleanText(raw.storeNumber);
+    const inferredStoreNumber = explicitStoreNumber ? '' : inferStoreNumber(raw.bannerName);
+    const storeNumber = explicitStoreNumber || inferredStoreNumber;
     return {
       ...raw,
       slId: cleanText(raw.slId),
@@ -113,8 +121,9 @@
       stateKey: normalizeWords(raw.state),
       zip: normalizeZip(raw.zip),
       zip3: createZip3(raw.zip),
-      storeNumber: cleanText(raw.storeNumber),
-      storeKey: normalizeWords(raw.storeNumber),
+      storeNumber,
+      storeNumberInferred: !!inferredStoreNumber || !!raw.storeNumberInferred,
+      storeKey: normalizeWords(storeNumber),
       phone10: phoneDigits.length >= 10 ? phoneDigits.slice(-10) : '',
       phone7: phoneDigits.length >= 7 ? phoneDigits.slice(-7) : ''
     };
@@ -157,7 +166,7 @@
     if (sameAddress) { const exactAddress=source.addressKey===other.addressKey; rules.push(exactAddress?'Same standardized address':'Same or partial standardized address'); fieldMatches.address=true; score+=exactAddress?25:15; }
     const exactUnitMatch = !!(source.unitKey && source.unitKey === other.unitKey && source.addressKey === other.addressKey);
     if (exactUnitMatch) { score+=10; fieldMatches.unit=true; rules.push('Same full address and unit'); }
-    if (source.unitKey && other.unitKey && source.unitKey !== other.unitKey) rules.push('Different unit — review required');
+    if (source.unitKey && other.unitKey && source.unitKey !== other.unitKey) rules.push(`Different unit: ${other.unitKey.toUpperCase()} instead of ${source.unitKey.toUpperCase()}`);
     if (sameAddress && sameStore) rules.push('Same address and store number');
     for (const [field,key,points,label] of [['city','cityKey',10,'Same city'],['state','stateKey',10,'Same state']]) {
       if(source[key]&&source[key]===other[key]){fieldMatches[field]=true;score+=points;rules.push(label);}
@@ -203,6 +212,29 @@
     return [...grouped.values()].sort((a,b)=>Number(b.exactUnitMatch)-Number(a.exactUnitMatch)||Number(b.directMatch)-Number(a.directMatch)||b.score-a.score||String(a.candidate.slId||'').localeCompare(String(b.candidate.slId||'')));
   }
 
+  function explainCandidate(rawSource, result) {
+    const source = normalizeSource(rawSource || {});
+    const candidate = normalizeSource(result.candidate || result);
+    const matches = result.fieldMatches || {};
+    const reasons = [];
+    if (result.exactUnitMatch) reasons.push('Same address and unit');
+    else if (matches.address) reasons.push('Same or similar address');
+    if (matches.bannerName) reasons.push('Same business name');
+    else {
+      const names = bannerSearchWords(candidate.bannerName);
+      if (bannerSearchWords(source.bannerName).some(word => word.length >= 3 && names.includes(word))) reasons.push('Similar business name');
+    }
+    if (matches.storeNumber) reasons.push('Same store number');
+    if (matches.phone) reasons.push('Same phone number');
+    else if (matches.phone7) reasons.push('Same last 7 phone digits');
+    if (!reasons.length && matches.zip) reasons.push('Same ZIP');
+    if (!reasons.length && matches.city) reasons.push('Same city');
+    const conflicts = [];
+    if (source.unitKey && candidate.unitKey && source.unitKey !== candidate.unitKey) conflicts.push(`Different unit: ${candidate.unitKey.toUpperCase()} instead of ${source.unitKey.toUpperCase()}`);
+    if (source.storeKey && candidate.storeKey && source.storeKey !== candidate.storeKey) conflicts.push(`Different store number: ${candidate.storeNumber} instead of ${source.storeNumber}`);
+    return {summary: reasons.slice(0,3).join('; ') || 'Review this possible match', conflicts};
+  }
+
   function getTopTdIds(results) {
     const ids = [];
     for (const item of results || []) {
@@ -220,5 +252,5 @@
     return [['SL_ID',candidate?.slId],['SL_STORE_NAME',candidate?.bannerName],['SL_STORE_NUMBER',candidate?.storeNumber],['SL_PA_LINE1',candidate?.address],['SL_PA_CITY_NAME',candidate?.city],['SL_PA_STATE_CODE',candidate?.state],['SL_PA_POSTAL_CODE',candidate?.zip],['PHONE',candidate?.phone]].filter(([,v]) => cleanText(v)).map(([h,v]) => `${h}: ${cleanText(v)}`).join('\n');
   };
 
-  return { cleanText, normalizeWords, normalizeBanner, bannerSearchWords, splitAddress, normalizeAddress, addressWildcard, normalizePostal, normalizeZip, createZip3, wildcardWords, normalizeSource, createSearchPlan, consolidateCandidates, getTopTdIds, formatTdCopy, formatFullCopy };
+  return { cleanText, normalizeWords, normalizeBanner, inferStoreNumber, bannerSearchWords, splitAddress, normalizeAddress, addressWildcard, normalizePostal, normalizeZip, createZip3, wildcardWords, normalizeSource, createSearchPlan, consolidateCandidates, explainCandidate, getTopTdIds, formatTdCopy, formatFullCopy };
 });

@@ -13,9 +13,11 @@
         .result-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}.result-heading h4{min-width:0;overflow-wrap:anywhere}.record-status{display:inline-block;flex:none;max-width:50%;overflow-wrap:anywhere;border:1px solid #cbd5e1;border-radius:999px;padding:2px 7px;font-size:9px;font-weight:650;line-height:1.4;background:#f1f5f9;color:#475569}.record-status[data-status=open]{background:#f0fdf4;border-color:#bbf7d0;color:#166534}.record-status[data-status=closed]{background:#fef2f2;border-color:#fecaca;color:#991b1b}.record-status[data-status=unverified]{background:#fffbeb;border-color:#fde68a;color:#92400e}.record-status[data-status=duplicate]{background:#eff6ff;border-color:#bfdbfe;color:#1e40af}
         .notice[data-tone=warning]{background:#fffbeb;border-color:#fde68a;color:#92400e;font-weight:600}
         .quick-searches{position:absolute;bottom:calc(100% + 4px);left:50%;transform:translateX(-50%);display:flex;gap:3px;padding:3px;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 2px 8px #0f172a18}.quick-search{width:25px;height:25px;padding:0;border:1px solid #cbd5e1;border-radius:5px;background:#fff;color:#1e40af;font:600 10px Segoe UI,sans-serif;cursor:pointer}.quick-search:hover{background:#eff6ff}.quick-search:disabled{opacity:.4;cursor:not-allowed}.quick-search:focus-visible{outline:2px solid #2563eb;outline-offset:2px}
+        .bot-status{position:absolute;right:calc(100% + 10px);bottom:42px;display:flex;align-items:center;gap:8px;width:max-content;max-width:220px;padding:7px 9px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;color:#334155;box-shadow:0 2px 8px #0f172a18;font:500 11px Segoe UI,sans-serif}.bot-status[hidden]{display:none}.status-right .bot-status{right:auto;left:calc(100% + 10px)}.bot-progress{max-width:160px;overflow-wrap:anywhere}.quick-stop{border:1px solid #fecaca;background:#fef2f2;color:#991b1b;border-radius:5px;padding:4px 7px;font-size:10px;cursor:pointer}.quick-stop[hidden]{display:none}.conflicts{color:#92400e!important}.source-inference{font-size:10px;color:#64748b}
         ${root.PickerBookmarkRobot.css}
       </style>
       <div class="shell" data-state="ready">
+        <div class="bot-status" hidden><span class="bot-progress" role="status" aria-live="polite"></span><button class="quick-stop" aria-label="Stop searches">Stop</button></div>
         <div class="quick-searches" aria-label="Automation searches"><button class="quick-search" data-search="banner" title="Banner searches" aria-label="Banner searches">B</button><button class="quick-search" data-search="address" title="Address searches" aria-label="Address searches">A</button><button class="quick-search" data-search="phone" title="Phone search" aria-label="Phone search">P</button><button class="quick-search" data-search="store" title="Store number search" aria-label="Store number search">S</button><button class="quick-search" data-search="all" title="All Search" aria-label="All Search">All</button></div>
         <button class="bot" title="Open Picker Bookmark v1" aria-label="Open Picker Bookmark v1">
           ${root.PickerBookmarkRobot.svg}
@@ -73,8 +75,9 @@
       catch { $('.notice').textContent = 'Copy failed. Select the visible text and copy it manually.'; }
     };
     const position = () => {
-      if (!open) return;
       const rect = $('.bot').getBoundingClientRect();
+      shell.classList.toggle('status-right', rect.left < 240);
+      if (!open) return;
       const placement = Layout.computePanelPlacement(rect, { width: 430, height: Math.min(680, panel.scrollHeight || 680) }, { width: window.innerWidth, height: window.innerHeight });
       Object.assign(panel.style, { left: `${placement.left}px`, top: `${placement.top}px`, width: `${placement.width}px`, maxHeight: `${placement.maxHeight}px` });
     };
@@ -85,7 +88,7 @@
       previousStatus = state.status;
       const source = state.source || {};
       $('.source-name').textContent = source.bannerName || 'Manual screen required';
-      $('.source-meta').textContent = [state.profile === 'retailSync' ? 'Retail' : 'Store', source.storeNumber && `Store #${source.storeNumber}`, address()].filter(Boolean).join(' · ');
+      $('.source-meta').textContent = [state.profile === 'retailSync' ? 'Retail' : 'Store', source.storeNumber && `Store #${source.storeNumber}${source.storeNumberInferred ? ' (from banner)' : ''}`, address()].filter(Boolean).join(' · ');
       const fields = $('.fields'); fields.textContent = '';
       [['bannerName','Banner'],['storeNumber','Store #'],['address','Address'],['city','City'],['state','State'],['zip','ZIP'],['phone','Phone']].forEach(([key,label]) => { const button=document.createElement('button'); button.className='field'; button.dataset.copy=key; button.disabled=!source[key]; button.innerHTML=`<span>${label}</span><b></b>`; button.querySelector('b').textContent=source[key]||'Not available'; fields.appendChild(button); });
       const total = state.total || state.plan?.length || 0; const progress = state.progress || 0;
@@ -93,6 +96,10 @@
       $('.fill').style.width = total ? `${Math.min(100, progress / total * 100)}%` : '0%';
       $('.progress-text').textContent = state.activeQuery ? `${progress}/${total} — ${state.activeQuery.label}` : `${progress}/${total} — ${state.status || 'ready'}`;
       const busy=['running','waiting','paused'].includes(state.status); $('.run').disabled=busy||!source.bannerName; $('.google-search').disabled=!googleQuery; $('.retry').disabled=busy||state.status!=='incomplete'; $('.pause').disabled=!busy; setButtonLabel($('.pause'),state.status==='paused'?'Resume':'Pause'); $('.cancel').disabled=!busy;
+      const progressLabel = root.PickerBookmarkProgress.describeProgress(state);
+      $('.bot-progress').textContent = progressLabel;
+      $('.bot-status').hidden = open || state.status === 'ready';
+      $('.quick-stop').hidden = !busy;
       $('.notice').textContent=state.diagnostic || (state.status === 'ready' ? 'Ready.' : state.status === 'completed' ? 'Checks complete.' : 'Checking current record.');
       const availablePlan = state.source ? Engine.createSearchPlan(state.source) : [];
       const queryGroups = {banner:['banner-exact-zip','banner-wildcard-zip'],address:['address-city','address-zip'],phone:['phone'],store:['store-banner']};
@@ -101,13 +108,13 @@
       $('.notice').dataset.tone = manualRequired ? 'warning' : 'info';
       $('.notice').setAttribute('role', manualRequired ? 'alert' : 'status');
       const results=$('.results'); results.textContent='';
-      (state.results||[]).forEach((item,index)=>{ const candidate=item.candidate||item; const card=document.createElement('article'); card.className=`result ${item.directMatch?'direct':String(item.classification||'').startsWith('Exact')?'exact':''}`; card.innerHTML=`<div class="result-heading"><h4></h4><span class="record-status"></span></div><p class="kind"></p><p class="where"></p><p class="why"></p><div class="result-actions"><button class="btn" data-icon="copy" data-result="td" data-index="${index}">TD Copy</button><button class="btn" data-icon="copy" data-result="full" data-index="${index}">Full Copy</button></div>`; const rawStatus=Engine.cleanText(candidate.storeStatus || candidate.copyFields?.find(field => /^(?:STORE_STATUS|SL_STORE_STATUS|RS_STORE_STATUS|STATUS)$/i.test(field.header))?.value); const pill=card.querySelector('.record-status'); const statusKey=rawStatus.toLowerCase().replace(/[^a-z]/g,''); const knownStatus={open:'Open',closed:'Closed',unverified:'Unverified',unverifyed:'Unverified',duplicate:'Duplicate'}; pill.textContent=knownStatus[statusKey] || rawStatus || 'Status unavailable'; pill.dataset.status=statusKey==='unverifyed'?'unverified':statusKey; pill.title=rawStatus ? `Record status: ${rawStatus}` : 'Record status was not provided'; card.querySelector('h4').textContent=candidate.bannerName||`SL_ID ${candidate.slId||'Unknown'}`; card.querySelector('.kind').textContent=item.classification||'Potential duplicate'; card.querySelector('.where').textContent=[candidate.address,candidate.city,candidate.state,candidate.zip].filter(Boolean).join(', '); card.querySelector('.why').textContent=(item.matchedRules||[]).join(' • '); decorateIcons(card); results.appendChild(card); });
+      (state.results||[]).forEach((item,index)=>{ const candidate=item.candidate||item; const card=document.createElement('article'); card.className=`result ${item.directMatch?'direct':String(item.classification||'').startsWith('Exact')?'exact':''}`; card.innerHTML=`<div class="result-heading"><h4></h4><span class="record-status"></span></div><p class="kind"></p><p class="where"></p><p class="why"></p><p class="conflicts"></p><div class="result-actions"><button class="btn" data-icon="copy" data-result="td" data-index="${index}">TD Copy</button><button class="btn" data-icon="copy" data-result="full" data-index="${index}">Full Copy</button></div>`; const rawStatus=Engine.cleanText(candidate.storeStatus || candidate.copyFields?.find(field => /^(?:STORE_STATUS|SL_STORE_STATUS|RS_STORE_STATUS|STATUS)$/i.test(field.header))?.value); const pill=card.querySelector('.record-status'); const statusKey=rawStatus.toLowerCase().replace(/[^a-z]/g,''); const knownStatus={open:'Open',closed:'Closed',unverified:'Unverified',unverifyed:'Unverified',duplicate:'Duplicate'}; pill.textContent=knownStatus[statusKey] || rawStatus || 'Status unavailable'; pill.dataset.status=statusKey==='unverifyed'?'unverified':statusKey; pill.title=rawStatus ? `Record status: ${rawStatus}` : 'Record status was not provided'; card.querySelector('h4').textContent=candidate.bannerName||`SL_ID ${candidate.slId||'Unknown'}`; card.querySelector('.kind').textContent=item.classification||'Potential duplicate'; card.querySelector('.where').textContent=[candidate.address,candidate.city,candidate.state,candidate.zip].filter(Boolean).join(', '); const explanation=Engine.explainCandidate(state.source,item); card.querySelector('.why').textContent=explanation.summary; card.querySelector('.conflicts').textContent=explanation.conflicts.join('; '); decorateIcons(card); results.appendChild(card); });
       if (!(state.results||[]).length) { const empty=document.createElement('div');empty.className='empty';empty.textContent=state.status==='completed'?'No duplicates found.':'Run checks to see duplicate results.';results.appendChild(empty); }
       position();
     }
     const unsubscribe = store.subscribe(render); lifecycle.add(unsubscribe);
-    function openPanel() { if(killing)return; open=true; panel.classList.add('open'); window.requestAnimationFrame(position); }
-    function closePanel() { open=false; panel.classList.remove('open'); }
+    function openPanel() { if(killing)return; open=true; $('.bot-status').hidden=true; panel.classList.add('open'); window.requestAnimationFrame(position); }
+    function closePanel() { open=false; panel.classList.remove('open'); $('.bot-status').hidden=state.status==='ready'; position(); }
     function finishKill() {
       if (killed) return;
       killed = true;
@@ -134,6 +141,7 @@
       const target=event.target.closest('button'); if(!target)return;
       if(target.classList.contains('bot')) { if(suppressClick){suppressClick=false;return;} animateRobot('waving',1200); return open?closePanel():openPanel(); }
       if(target.classList.contains('close')) return closePanel();
+      if(target.classList.contains('quick-stop')) { controller.cancel(); return; }
       if(target.dataset.search || target.classList.contains('run') || target.classList.contains('retry')) { closePanel(); return controller.run(target.dataset.search || 'all').catch(error=>{ $('.notice').textContent=error.message; $('.bot').title=error.message; }); }
       if(target.classList.contains('pause')) return state.status==='paused'?controller.resume():controller.pause();
       if(target.classList.contains('cancel')) return controller.cancel();
@@ -162,6 +170,7 @@
       drag.lastX=event.clientX;
       host.style.right=`${Math.max(6,Math.min(window.innerWidth-140,drag.right-dx))}px`;
       host.style.bottom=`${Math.max(6,Math.min(window.innerHeight-190,drag.bottom-dy))}px`;
+      position();
     });
     function endDrag() {
       if(!drag)return;

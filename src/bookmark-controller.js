@@ -54,7 +54,7 @@
         return found;
       }
       extraction = found;
-      store.set({ status: 'ready', profile: found.profile, source: { ...found.source, zip: Engine.normalizeZip(found.source.zip) }, initialCandidates: found.candidates || [], sourceRowCount: found.sourceRowCount, initialCandidateCount: found.initialCandidateCount, results: [], linksSearch: null, tdIds: [], observations: [], plan: [], progress: 0, total: 0, activeQuery: null, diagnostic: '', diagnosticCode: '' });
+      store.set({ status: 'ready', profile: found.profile, source: Engine.normalizeSource ? Engine.normalizeSource(found.source) : { ...found.source, zip: Engine.normalizeZip(found.source.zip) }, initialCandidates: found.candidates || [], sourceRowCount: found.sourceRowCount, initialCandidateCount: found.initialCandidateCount, results: [], linksSearch: null, tdIds: [], observations: [], plan: [], progress: 0, total: 0, activeQuery: null, diagnostic: '', diagnosticCode: '' });
       return found;
     }
 
@@ -90,7 +90,7 @@
       if (runResult.status === 'completed' && tdIds.length) {
         const aborter = new AbortController();
         completionAborter = aborter;
-        store.set({status:'waiting',results,activeQuery:{label:'Links search: top ranked TDs'},progress:plan.length,total:plan.length+1});
+        store.set({status:'waiting',results,tdIds,activeQuery:{type:'links',label:`Reviewing links for the top ${tdIds.length} matches...`},progress:plan.length,total:plan.length+1});
         try {
           linksSearch = await root.PickerBookmarkLinks.execute(tdIds,{profile:current.profile,signal:aborter.signal,timeoutMs:30000,stableMs:1500,
             isCurrent:() => { refresh(); return !destroyed && revision === runRevision; }});

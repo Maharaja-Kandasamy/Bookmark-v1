@@ -14,6 +14,7 @@ const inputs = [
   'src/bookmark-links.js',
   'src/bookmark-controller.js',
   'src/bookmark-robot.js',
+  'src/bookmark-progress.js',
   'src/bookmark-bot.js',
   'src/bookmark-entry.js'
 ];

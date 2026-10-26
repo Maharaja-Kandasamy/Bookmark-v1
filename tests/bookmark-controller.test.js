@@ -159,3 +159,14 @@ test('cancel stops the final Links step without reporting completion',async()=>{
  assert.equal(result.status,'cancelled');
  assert.equal(result.results.length,1);
 });
+
+test('banner store number fills the bot source and drives the store search without editing client data',async()=>{
+ const source={slId:'SRC',bannerName:'Acme #00123',storeNumber:'',zip:'98407'};
+ const {controller,store}=setup({PickerDuplicateEngine:require('../vendor/duplicate-engine'),PickerGsrsTableAdapter:{extractFromDocument:()=>({profile:'storeView',source,candidates:[]})}});
+ const result=await controller.run('store');
+ assert.equal(store.get().source.storeNumber,'00123');
+ assert.equal(store.get().source.storeNumberInferred,true);
+ assert.equal(result.plan[0].fields.storeNumber,'00123');
+ assert.equal(result.plan[0].fields.banner,'acme*');
+ assert.equal(source.storeNumber,'');
+});

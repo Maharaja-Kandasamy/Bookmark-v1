@@ -75,3 +75,11 @@ Original house numbers and unit values are kept for ranking. An exact full addre
 ## Noisy banner search text
 
 Banner queries omit standalone one-character tokens and treat punctuation as wildcard boundaries. `Circle K`, `Circle @ K`, and `A Circle B` search as `circle*`. A single remaining word is kept in full; multiword queries retain the existing four-character word prefixes with single `*` separators and no spaces. HTML fragments/entities, URLs, email addresses, placeholder words and long phone-like numeric tokens are excluded from search text. Banner searches are skipped when no useful words remain. Original banner text and identity comparisons remain available for display and ranking; broad retrieval alone is not an exact name match.
+
+## Visible progress, match reasons and banner store numbers
+
+While the panel is minimized, a small status beside the robot names the current search and its progress. Stop cancels the active automation without opening the panel. Final TD lookup displays `Reviewing links for the top N matches...`; `Finished` appears only after that step completes. Cancellation displays `Stopped`, and incomplete searches ask the user to open results.
+
+Result cards summarize the strongest matching evidence and separately show conflicts such as `Different unit: 200 instead of 100`. Existing ranking keeps the strongest full address/unit match first.
+
+When Store # is blank, a single unambiguous numeric hashtag in the banner (for example `Acme #00123`) fills the bot's Store # with `00123` and enables the Store search. It is marked `from banner`; an existing Store # always takes priority. Hashtag numbers are omitted from business-name queries and comparisons. Multiple distinct hashtag numbers are not guessed. Client records are not edited.
