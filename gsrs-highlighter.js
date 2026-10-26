@@ -84,6 +84,7 @@ style.textContent=`
 #gsrs-visual-panel .gv-window-controls button[data-window-close]{background:#f6dcd8;border-color:#e8bdb6;color:#8b3c33}
 #gsrs-visual-panel .gv-window-controls button[data-window-close]:hover{background:#edc5be}
 #gsrs-visual-panel .gv-window-controls button[hidden]{display:none}
+#gsrs-visual-panel .gv-window-controls button[data-window-close] svg{display:block;width:12px;height:12px;flex:none}
 #gsrs-visual-panel .gv-header{padding:12px 14px}
 
 `;
@@ -97,7 +98,7 @@ headerBar.append(panel.querySelector('[data-drag]'));panel.prepend(headerBar);
 const toggle=document.createElement('button');toggle.type='button';toggle.setAttribute('data-toggle','');toggle.setAttribute('aria-controls','gsrs-visual-details');toggle.setAttribute('aria-expanded','false');toggle.textContent='Expand';
 panel.querySelector('.gv-body').id='gsrs-visual-details';
 const windowControls=document.createElement('div');windowControls.className='gv-window-controls';windowControls.setAttribute('role','group');windowControls.setAttribute('aria-label','Window controls');
-const closeControl=document.createElement('button');closeControl.type='button';closeControl.setAttribute('data-window-close','');closeControl.setAttribute('aria-label','Close GSRS Visuals and remove highlights');closeControl.title='Close GSRS Visuals and remove highlights';closeControl.textContent='×';closeControl.onclick=()=>remove();
+const closeControl=document.createElement('button');closeControl.type='button';closeControl.setAttribute('data-window-close','');closeControl.setAttribute('aria-label','Close GSRS Visuals and remove highlights');closeControl.title='Close GSRS Visuals and remove highlights';closeControl.innerHTML='<svg viewBox="0 0 16 16" width="12" height="12" fill="none" aria-hidden="true" focusable="false"><path d="m4 4 8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';closeControl.onclick=()=>remove();
 toggle.hidden=true;toggle.textContent='−';toggle.setAttribute('aria-label','Minimize GSRS Visuals');toggle.title='Minimize GSRS Visuals';
 windowControls.append(toggle,closeControl);headerBar.append(windowControls);
 let dockSide='right';
