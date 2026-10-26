@@ -65,3 +65,9 @@ Automation keeps non-query search values, temporarily selects only the filters n
 Picker accepts five-digit ZIPs, ZIP+4 with a hyphen, and compact ZIP+4 values. Short base ZIPs are padded to five digits. Compact six-to-nine-digit values are treated as ZIP+4 with missing leading zeros: `9877678` becomes `00987-7678`, with `00987` for the base ZIP and `009*` for ZIP3 searches. Malformed formats are excluded from ZIP searches. This repairs formatting; it does not verify address deliverability.
 
 After a successful duplicate-search group, Picker takes up to five unique numeric TD IDs from the final ranking, preserves leading zeros, discovers the labelled Links control, TD input and Search button, and submits the IDs as a comma-separated list. Completion waits for this final search to settle. Missing or ambiguous controls leave ranked results available with an incomplete diagnostic and the TD list. Original search-field values are restored after the operation. Cancellation and source changes stop the final search.
+
+## Primary street and unit matching
+
+Address search uses the first house number and primary street name. House numbers longer than four digits lose their final two digits; shorter numbers lose one digit, retaining at least one. Each street-name word loses its final two letters, retaining at least one. Components are joined by single wildcards with no spaces. Road types, directions, unit/suite details and appended secondary addresses are omitted. Example: `5121 N Pearl St #100 23315 Co Hwy 18 Ruston WA` searches as `512*pea*`.
+
+Original house numbers and unit values are kept for ranking. An exact full address plus unit match takes priority; merely matching a shortened house-number prefix does not count as an exact address. Banner matching treats spaced possessive `Wren S`, `Wren's`, and `Wrens` equivalently; the wildcard is `wren*nest*baki*` for `Wren S Nest Baking Co`.

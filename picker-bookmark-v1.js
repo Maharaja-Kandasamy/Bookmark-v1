@@ -15,13 +15,18 @@
   const cleanText = value => String(value || '').trim().replace(/\s+/g, ' ');
   const normalizeWords = value => cleanText(value).toLowerCase()
     .replace(/&/g, ' and ').replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
-  const normalizeAddress = value => normalizeWords(value).replace(/\s+(?:suite|ste|unit|apt)\s+.*$/i, '').split(' ')
-    .filter(Boolean)
-    .map(token => suffixes.get(token) || token).join(' ')
-    .trim();
+  function splitAddress(value) {
+    const text = cleanText(value);
+    const unit = /(?:#|\b(?:suite|ste|unit|apt|apartment|room|rm|floor|fl|building|bldg)\b[.\s:#-]*)\s*([a-z0-9]+(?:-[a-z0-9]+)?)/i.exec(text);
+    const base = (unit ? text.slice(0, unit.index) : text).trim();
+    return { base, unitKey: unit ? normalizeWords(unit[1]) : '' };
+  }
+  const normalizeAddress = value => normalizeWords(splitAddress(value).base).split(' ')
+    .filter(Boolean).map(token => suffixes.get(token) || token).join(' ').trim();
   const addressNoise = new Set('street st road rd avenue ave av boulevard blvd drive dr lane ln highway hwy route rte court ct circle cir place pl terrace ter parkway pkwy way trail trl square sq expressway expy junction jct mount mt mountain mtn fort ft saint west w east e north n south s northeast ne northwest nw southeast se southwest sw'.split(' '));
-  const normalizeBanner = value => normalizeWords(value)
+  const normalizeBanner = value => normalizeWords(cleanText(value).replace(/([a-z0-9])['\u2019]s\b/gi, '$1s'))
     .replace(/\b(?:l\s+l\s+c|l\s+t\s+d|i\s+n\s+c)\b/g, ' ')
+    .replace(/\b([a-z0-9]+)\s+s\b/g, '$1s')
     .split(' ').filter(word => word && !['limited','ltd','inc','incorporated','llc','llp','plc','corp','corporation','co','company'].includes(word)).join(' ');
   const digits = value => String(value || '').replace(/\D/g, '');
 
@@ -46,7 +51,30 @@
     return zip ? `${zip.slice(0, 3)}*` : '';
   }
 
+  function addressSearchParts(value) {
+    const words = normalizeWords(splitAddress(value).base).split(' ').filter(Boolean);
+    const houseIndex = words.findIndex(word => /^\d+[a-z]?$/.test(word));
+    const houseNumber = houseIndex >= 0 ? words[houseIndex] : '';
+    const street = [];
+    const roadTypes = new Set('street st road rd avenue ave av boulevard blvd drive dr lane ln highway hwy route rte court ct circle cir place pl terrace ter parkway pkwy way trail trl square sq expressway expy junction jct'.split(' '));
+    for (const word of words.slice(houseIndex >= 0 ? houseIndex + 1 : 0)) {
+      if (roadTypes.has(word) && street.length) break;
+      if (addressNoise.has(word) || ['county','co'].includes(word)) continue;
+      if (/^\d/.test(word) && street.length) break;
+      street.push(word);
+    }
+    return {houseNumber, street};
+  }
+  function addressWildcard(value) {
+    const {houseNumber,street} = addressSearchParts(value);
+    if (!street.length) return '';
+    const house = houseNumber ? houseNumber.slice(0, Math.max(1,houseNumber.length-(houseNumber.length>4?2:1))) : '';
+    const words = street.map(word => /^\d+$/.test(word) ? word : word.slice(0,Math.max(1,word.length-2)));
+    return [house,...words].filter(Boolean).join('*')+'*';
+  }
+
   function wildcardWords(value, kind) {
+    if (kind === 'address') return addressWildcard(value);
     let words = (kind === 'address' ? normalizeAddress(value) : kind === 'banner' ? normalizeBanner(value) : normalizeWords(value)).split(' ').filter(Boolean);
     if (kind === 'address') words = words.filter(word => !addressNoise.has(word));
     return words.map((word, index) => {
@@ -66,6 +94,7 @@
       bannerKey: normalizeBanner(raw.bannerName),
       address: cleanText(raw.address),
       addressKey: normalizeAddress(raw.address),
+      unitKey: splitAddress(raw.address).unitKey,
       city: cleanText(raw.city),
       cityKey: normalizeWords(raw.city),
       stateKey: normalizeWords(raw.state),
@@ -83,7 +112,7 @@
     const bannerWildcard = wildcardWords(source.bannerName, 'banner');
     const addressWildcard = wildcardWords(source.address, 'address');
     const candidates = [
-      source.bannerKey && source.zip3 && { type: 'banner-exact-zip', label: 'Exact banner + ZIP3', fields: { banner: source.bannerName, zip: source.zip3 } },
+      source.bannerKey && source.zip3 && { type: 'banner-exact-zip', label: 'Exact banner + ZIP3', fields: { banner: source.bannerKey, zip: source.zip3 } },
       bannerWildcard && source.zip3 && { type: 'banner-wildcard-zip', label: 'Wildcard banner + ZIP3', fields: { banner: bannerWildcard, zip: source.zip3 } },
       addressWildcard && source.city && { type: 'address-city', label: 'Wildcard address + city', fields: { address: addressWildcard, city: source.city } },
       addressWildcard && source.zip3 && { type: 'address-zip', label: 'Wildcard address + ZIP3', fields: { address: addressWildcard, zip: source.zip3 } },
@@ -113,6 +142,9 @@
     if (sameStore) { rules.push('Same store number'); fieldMatches.storeNumber=true; score+=20; }
     const sameAddress = includesAddress(source.addressKey, other.addressKey);
     if (sameAddress) { const exactAddress=source.addressKey===other.addressKey; rules.push(exactAddress?'Same standardized address':'Same or partial standardized address'); fieldMatches.address=true; score+=exactAddress?25:15; }
+    const exactUnitMatch = !!(source.unitKey && source.unitKey === other.unitKey && source.addressKey === other.addressKey);
+    if (exactUnitMatch) { score+=10; fieldMatches.unit=true; rules.push('Same full address and unit'); }
+    if (source.unitKey && other.unitKey && source.unitKey !== other.unitKey) rules.push('Different unit � review required');
     if (sameAddress && sameStore) rules.push('Same address and store number');
     for (const [field,key,points,label] of [['city','cityKey',10,'Same city'],['state','stateKey',10,'Same state']]) {
       if(source[key]&&source[key]===other[key]){fieldMatches[field]=true;score+=points;rules.push(label);}
@@ -127,7 +159,7 @@
     const directMatch=!!directReason;
     const scorePercent=Math.min(100,Math.round(score/110*100));
     const classification=directMatch?'Direct Duplicate':scorePercent>=80?'Exact Duplicate':scorePercent>=60?'High-Confidence Duplicate':rules.length?'Partial Duplicate — Review Required':'';
-    return { rules, classification, directMatch, directReason, score, scorePercent, fieldMatches };
+    return { rules, classification, exactUnitMatch, directMatch, directReason, score, scorePercent, fieldMatches };
   }
 
   function consolidateCandidates(rawSource, observations) {
@@ -142,17 +174,20 @@
       const key = normalized.slId
         ? `id:${normalized.slId.toLowerCase()}`
         : `fallback:${normalized.bannerKey}|${normalized.addressKey}|${normalized.storeKey}|${normalized.phone7}`;
-      const current = grouped.get(key) || { key, candidate: { ...candidate, copyFields:[...(candidate.copyFields || [])] }, classification: judged.classification, directMatch:judged.directMatch, directReason:judged.directReason, score:judged.score, scorePercent:judged.scorePercent, fieldMatches:judged.fieldMatches, matchedRules: [], queries: [] };
+      const current = grouped.get(key) || { key, candidate: { ...candidate, copyFields:[...(candidate.copyFields || [])] }, classification: judged.classification, exactUnitMatch:judged.exactUnitMatch, directMatch:judged.directMatch, directReason:judged.directReason, score:judged.score, scorePercent:judged.scorePercent, fieldMatches:judged.fieldMatches, matchedRules: [], queries: [] };
       const existingFields = new Map((current.candidate.copyFields || []).map(item => [item.header, item]));
       (candidate.copyFields || []).forEach(item => { if (item?.header && item.value && !existingFields.has(item.header)) existingFields.set(item.header, item); });
       current.candidate.copyFields = [...existingFields.values()];
       if (!cleanText(current.candidate.storeStatus) && cleanText(candidate.storeStatus)) current.candidate.storeStatus = candidate.storeStatus;
-      if (judged.directMatch || judged.score > current.score) Object.assign(current,{classification:judged.classification,directMatch:judged.directMatch,directReason:judged.directReason,score:judged.score,scorePercent:judged.scorePercent,fieldMatches:judged.fieldMatches});
+      if ((judged.exactUnitMatch && !current.exactUnitMatch) || (judged.exactUnitMatch === current.exactUnitMatch && (Number(judged.directMatch) > Number(current.directMatch) || (judged.directMatch === current.directMatch && judged.score > current.score)))) {
+        Object.assign(current,{classification:judged.classification,exactUnitMatch:judged.exactUnitMatch,directMatch:judged.directMatch,directReason:judged.directReason,score:judged.score,scorePercent:judged.scorePercent,fieldMatches:judged.fieldMatches});
+        current.candidate = {...current.candidate,...candidate,copyFields:current.candidate.copyFields};
+      }
       current.matchedRules = [...new Set([...current.matchedRules, ...judged.rules])];
       current.queries = [...new Set([...current.queries, observation.queryId].filter(Boolean))];
       grouped.set(key, current);
     });
-    return [...grouped.values()].sort((a,b)=>Number(b.directMatch)-Number(a.directMatch)||b.score-a.score||String(a.candidate.slId||'').localeCompare(String(b.candidate.slId||'')));
+    return [...grouped.values()].sort((a,b)=>Number(b.exactUnitMatch)-Number(a.exactUnitMatch)||Number(b.directMatch)-Number(a.directMatch)||b.score-a.score||String(a.candidate.slId||'').localeCompare(String(b.candidate.slId||'')));
   }
 
   function getTopTdIds(results) {
@@ -172,7 +207,7 @@
     return [['SL_ID',candidate?.slId],['SL_STORE_NAME',candidate?.bannerName],['SL_STORE_NUMBER',candidate?.storeNumber],['SL_PA_LINE1',candidate?.address],['SL_PA_CITY_NAME',candidate?.city],['SL_PA_STATE_CODE',candidate?.state],['SL_PA_POSTAL_CODE',candidate?.zip],['PHONE',candidate?.phone]].filter(([,v]) => cleanText(v)).map(([h,v]) => `${h}: ${cleanText(v)}`).join('\n');
   };
 
-  return { cleanText, normalizeWords, normalizeBanner, normalizeAddress, normalizePostal, normalizeZip, createZip3, wildcardWords, normalizeSource, createSearchPlan, consolidateCandidates, getTopTdIds, formatTdCopy, formatFullCopy };
+  return { cleanText, normalizeWords, normalizeBanner, splitAddress, normalizeAddress, addressWildcard, normalizePostal, normalizeZip, createZip3, wildcardWords, normalizeSource, createSearchPlan, consolidateCandidates, getTopTdIds, formatTdCopy, formatFullCopy };
 });
 (function (root, factory) {
   const api = factory();

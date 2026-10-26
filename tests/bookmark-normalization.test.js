@@ -2,8 +2,8 @@ const engine = require('../vendor/duplicate-engine');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 test('wildcards omit address types, directions and mount variants', () => {
-  assert.equal(engine.wildcardWords('125 West Mount Main Road Suite 4', 'address'), '125*main*');
-  assert.equal(engine.wildcardWords('125 W Mt Main Rd Unit 8', 'address'), '125*main*');
+  assert.equal(engine.wildcardWords('125 West Mount Main Road Suite 4', 'address'), '12*ma*');
+  assert.equal(engine.wildcardWords('125 W Mt Main Rd Unit 8', 'address'), '12*ma*');
   assert.equal(engine.wildcardWords('Road Mt', 'address'), '');
 });
 test('business suffixes are removed from wildcard and comparison keys', () => {
@@ -11,8 +11,8 @@ test('business suffixes are removed from wildcard and comparison keys', () => {
   assert.equal(engine.normalizeBanner('Acme L.L.C.'), 'acme');
   assert.equal(engine.normalizeSource({bannerName:'Acme Inc.'}).bannerKey, 'acme');
   const plan = engine.createSearchPlan({bannerName:'Acme Ltd',address:'20 Mount Oak Road',city:'Austin',zip:'78701'});
-  assert.equal(plan.find(q=>q.type==='address-city').fields.address,'20*oak*');
-  assert.equal(plan.find(q=>q.type==='address-zip').fields.address,'20*oak*');
+  assert.equal(plan.find(q=>q.type==='address-city').fields.address,'2*o*');
+  assert.equal(plan.find(q=>q.type==='address-zip').fields.address,'2*o*');
   assert.equal(plan.find(q=>q.type==='banner-wildcard-zip').fields.banner,'acme*');
 });
 
@@ -66,4 +66,47 @@ test('top TD list takes ranked unique IDs and preserves leading zeros',()=>{
  const ranked=['7867788','0067788','7867788','1234567','7654321','2345678','9999999'].map(slId=>({candidate:{slId}}));
  assert.deepEqual(engine.getTopTdIds(ranked),['7867788','0067788','1234567','7654321','2345678']);
  assert.deepEqual(engine.getTopTdIds([{candidate:{slId:'not-a-td'}},{candidate:{slId:'0000012'}}]),['0000012']);
+});
+
+test('Wren example produces the confirmed primary street search and banner wildcard',()=>{
+ const address='5121 N Pearl St #100 23315 Co Hwy 18 Ruston WA';
+ assert.equal(engine.wildcardWords(address,'address'),'512*pea*');
+ assert.equal(engine.wildcardWords('Wren S Nest Baking Co','banner'),'wren*nest*baki*');
+ assert.equal(engine.normalizeBanner('Wren S Nest Baking Co'),engine.normalizeBanner('Wrens Nest Baking'));
+ assert.equal(engine.normalizeBanner("Wren's Nest Baking Co"),engine.normalizeBanner('Wrens Nest Baking'));
+ const plan=engine.createSearchPlan({bannerName:'Wren S Nest Baking Co',address,city:'Ruston',zip:'98407'});
+ assert.equal(plan.find(q=>q.type==='banner-exact-zip').fields.banner,'wrens nest baking');
+ for(const query of plan.filter(q=>q.fields.address))assert.equal(query.fields.address,'512*pea*');
+});
+
+test('house number and street shortening use single wildcards without unit or highway noise',()=>{
+ for(const [address,expected] of [
+  ['12345 N Pearl Street Suite 100','123*pea*'],
+  ['5121 North Pearl St Unit 100','512*pea*'],
+  ['5121 N Pearl St 23315 Co Hwy 18','512*pea*'],
+  ['123 Pearl Road','12*pea*'],
+  ['12 Pearl Road','1*pea*'],
+  ['1 Pearl Road','1*pea*'],
+  ['5121 Pearl Grove Avenue Apartment A','512*pea*gro*']
+ ]){
+  const actual=engine.wildcardWords(address,'address');assert.equal(actual,expected,address);
+  assert.doesNotMatch(actual,/\s|\*\*/);
+ }
+});
+
+test('exact full address and unit ranks first while prefix-only house matches stay broad',()=>{
+ const source={bannerName:'Wren S Nest Baking Co',address:'5121 N Pearl St #100 23315 Co Hwy 18 Ruston WA',phone:'5125551212'};
+ const results=engine.consolidateCandidates(source,[
+  {candidate:{slId:'A',bannerName:'Wrens Nest Baking',address:'5121 North Pearl Street Suite 200',phone:'5125551212'}},
+  {candidate:{slId:'B',bannerName:'Wrens Nest Baking',address:'5121 North Pearl Street Suite 100'}},
+  {candidate:{slId:'C',bannerName:'Wrens Nest Baking',address:'5129 N Pearl St Unit 100'}}
+ ]);
+ assert.equal(results[0].candidate.slId,'B');
+ assert.equal(results[0].exactUnitMatch,true);
+ assert.equal(results[0].fieldMatches.unit,true);
+ assert.equal(results.find(x=>x.candidate.slId==='A').exactUnitMatch,false);
+ assert.equal(results.find(x=>x.candidate.slId==='C').exactUnitMatch,false);
+ assert.equal(results.find(x=>x.candidate.slId==='C').fieldMatches.address,undefined);
+ assert.equal(engine.splitAddress(source.address).unitKey,'100');
+ assert.equal(engine.normalizeAddress(source.address),'5121 n pearl st');
 });
