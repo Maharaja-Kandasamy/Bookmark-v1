@@ -39,7 +39,7 @@ Exact / green:
 - Standardize common street suffixes/directions and apartment/suite abbreviations.
 - Recognize US state code, full name, and [code] name representations.
 Partial / amber (called moderate for addresses):
-- Same house number and street name with missing direction or descriptive words. Door numbers up to 10 apart, or overlapping door-number ranges, are amber when the street matches. Other door-number differences stay uncolored.
+- Shared street names are amber when house numbers, ranges, units, directions or street types differ. There is no house-number distance limit. Street types alone (Rd/Hwy) do not establish a match.
 - Store/city name has whole-word containment with at least three compact characters.
 - US five-digit ZIP matches the prefix of a nine-digit ZIP.
 No Match / uncolored: other nonblank differences.
@@ -68,7 +68,7 @@ if your managed browser blocks activation.
 ## Phone and partial address updates
 RS and SL prefixes are detected dynamically, including underscore separators.
 Both phone columns compare the last seven digits after removing formatting, a US country code and extensions. Zeros are preserved. Parent area codes are checked against each child’s area code; local matches with area-code differences or missing area codes are partial.
-An extra business prefix or missing street words can produce a partial address match when the house number and core street name agree. Route number differences stay uncolored; unit differences are amber when the main address matches.
+Equivalent abbreviations such as Road/Rd and Mount/Mt are exact when all address details agree. A shared street name with different address details is partial; different street names or route numbers stay uncolored.
 
 
 Use the checkbox beside each field to enable or disable its comparisons while Visuals is open. Disabled fields are uncolored and excluded from counts. Exact matches use muted sage; partial matches use soft amber.

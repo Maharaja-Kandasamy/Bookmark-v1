@@ -15,36 +15,24 @@ const header=s=>s.toUpperCase().replace(/^[\s\W_]*(RS|SL)(?=[\s\W_]|$)/,'').repl
 // Numeric segments lose leading zeros; punctuation/spacing/case are insignificant.
 const norm=s=>s.normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/[’']/g,'').replace(/[^A-Z0-9]+/g,' ').replace(/\d+/g,n=>n.replace(/^0+(?=\d)/,'')).trim();
 const blank=s=>!s.replace(/[\s\u200b\ufeff]/g,'');
-const words={STREET:'ST',ROAD:'RD',AVENUE:'AVE',BOULEVARD:'BLVD',DRIVE:'DR',LANE:'LN',COURT:'CT',CIRCLE:'CIR',TERRACE:'TER',PLACE:'PL',PARKWAY:'PKWY',HIGHWAY:'HWY',ROUTE:'RTE',NORTH:'N',SOUTH:'S',EAST:'E',WEST:'W',NORTHEAST:'NE',NORTHWEST:'NW',SOUTHEAST:'SE',SOUTHWEST:'SW',APARTMENT:'UNIT',APT:'UNIT',SUITE:'UNIT',STE:'UNIT'};
+const words={STREET:'ST',ROAD:'RD',AVENUE:'AVE',BOULEVARD:'BLVD',DRIVE:'DR',LANE:'LN',COURT:'CT',CIRCLE:'CIR',TERRACE:'TER',PLACE:'PL',PARKWAY:'PKWY',HIGHWAY:'HWY',ROUTE:'RTE',MOUNT:'MT',FORT:'FT',CENTER:'CTR',CENTRE:'CTR',TRAIL:'TRL',TURNPIKE:'TPKE',EXPRESSWAY:'EXPY',JUNCTION:'JCT',SQUARE:'SQ',BUILDING:'BLDG',FLOOR:'FL',NORTH:'N',SOUTH:'S',EAST:'E',WEST:'W',NORTHEAST:'NE',NORTHWEST:'NW',SOUTHEAST:'SE',SOUTHWEST:'SW',APARTMENT:'UNIT',APT:'UNIT',SUITE:'UNIT',STE:'UNIT'};
 const states='AL:ALABAMA|AK:ALASKA|AZ:ARIZONA|AR:ARKANSAS|CA:CALIFORNIA|CO:COLORADO|CT:CONNECTICUT|DE:DELAWARE|DC:DISTRICT OF COLUMBIA|FL:FLORIDA|GA:GEORGIA|HI:HAWAII|ID:IDAHO|IL:ILLINOIS|IN:INDIANA|IA:IOWA|KS:KANSAS|KY:KENTUCKY|LA:LOUISIANA|ME:MAINE|MD:MARYLAND|MA:MASSACHUSETTS|MI:MICHIGAN|MN:MINNESOTA|MS:MISSISSIPPI|MO:MISSOURI|MT:MONTANA|NE:NEBRASKA|NV:NEVADA|NH:NEW HAMPSHIRE|NJ:NEW JERSEY|NM:NEW MEXICO|NY:NEW YORK|NC:NORTH CAROLINA|ND:NORTH DAKOTA|OH:OHIO|OK:OKLAHOMA|OR:OREGON|PA:PENNSYLVANIA|RI:RHODE ISLAND|SC:SOUTH CAROLINA|SD:SOUTH DAKOTA|TN:TENNESSEE|TX:TEXAS|UT:UTAH|VT:VERMONT|VA:VIRGINIA|WA:WASHINGTON|WV:WEST VIRGINIA|WI:WISCONSIN|WY:WYOMING|PR:PUERTO RICO'.split('|').map(s=>s.split(':'));
-function canonical(s,f){let v=norm(s);if(f===2)v=v.split(' ').map(w=>words[w]||w).join(' ');if(f===4){const state=states.find(([c,n])=>[c,n,c+' '+n].includes(v));if(state)v=state[0];}return v.replace(/ /g,'');}
+function canonical(s,f){let v=norm(s);if(f===2)return norm(s.replace(/#/g,' UNIT ')).split(' ').map(w=>words[w]||w).join(' ');if(f===4){const state=states.find(([c,n])=>[c,n,c+' '+n].includes(v));if(state)v=state[0];}return v.replace(/ /g,'');}
 function phone(s){
  let digits=s.replace(/(?:\bext(?:ension)?\.?|\bx|#)\s*\d+\s*$/i,'').replace(/\D/g,'');
  if(digits.length===11&&digits[0]==='1')digits=digits.slice(1);
  return {local:digits.length>=7?digits.slice(-7):digits,area:digits.length===10?digits.slice(0,3):''};
 }
 function addressParts(s){
- // Ignore a business-name prefix, but keep route numbers and unit details.
- let range=s.match(/(?:^|\s)(\d+)\s*[-–—]\s*(\d+)(?=\s|$)/);
- if(range&&/\d/.test(s.slice(0,range.index)))range=null;
- if(range)s=s.slice(0,range.index)+s.slice(range.index).replace(range[0],(range[0].startsWith(' ')?' ':'')+range[1]);
+ // Drop the house/range and business prefix before comparing the street itself.
+ s=s.replace(/#/g,' UNIT ').replace(/(^|\s)(\d+)\s*[-–—]\s*\d+(?=\s|$)/,'$1$2');
  const tokens=norm(s).split(' ').map(w=>words[w]||w),start=tokens.findIndex(w=>/^\d+[A-Z]?$/.test(w));
- if(start<0)return null;
- const rest=tokens.slice(start+1),unit=rest.indexOf('UNIT');
+ const rest=tokens.slice(start<0?0:start+1);
+ const unit=rest.findIndex(w=>['UNIT','BLDG','FL'].includes(w));
  const street=unit<0?rest:rest.slice(0,unit);
- const types=new Set(['ST','RD','AVE','BLVD','DR','LN','CT','CIR','TER','PL','PKWY','HWY','RTE','ROUT']);
- return {house:tokens[start],range:range?[Number(range[1]),Number(range[2])]:null,unit:unit<0?'':rest.slice(unit+1).join(' '),numbers:street.filter(w=>/\d/.test(w)).join(' '),core:street.filter(w=>!types.has(w))};
-}
-function compatibleHouse(a,b){
- if(a.range||b.range){
-  if((a.range&&a.range[0]>a.range[1])||(b.range&&b.range[0]>b.range[1]))return false;
-  if(!/^\d+$/.test(a.house)||!/^\d+$/.test(b.house))return false;
-  const x=a.range||[Number(a.house),Number(a.house)],y=b.range||[Number(b.house),Number(b.house)];
-  return Math.max(x[0],y[0])<=Math.min(x[1],y[1]);
- }
- if(a.house===b.house)return true;
- if(!/^\d+$/.test(a.house)||!/^\d+$/.test(b.house))return false;
- return Math.abs(Number(a.house)-Number(b.house))<=10;
+ const types=new Set(['ST','RD','AVE','BLVD','DR','LN','CT','CIR','TER','PL','PKWY','HWY','RTE','ROUT','CTR','TRL','TPKE','EXPY','JCT','SQ']);
+ const directions=new Set(['N','S','E','W','NE','NW','SE','SW']);
+ return street.filter(w=>!types.has(w)&&!directions.has(w));
 }
 function compare(p,c,f,context={}){
  if(blank(p)||blank(c))return null;
@@ -56,12 +44,12 @@ function compare(p,c,f,context={}){
   return expected&&expected!==area?'partial':'exact';
  }
  const a=canonical(p,f),b=canonical(c,f);if(!a||!b)return null;if(a===b)return 'exact';
- // Nearby door numbers (within 10) or overlapping ranges merit review.
+ // A shared street name is partial even when house, suite or direction differs.
  if(f===2){
   const a=addressParts(p),b=addressParts(c);
-  if(!a||!b||!compatibleHouse(a,b)||a.numbers!==b.numbers)return 'none';
-  const small=a.core.length<=b.core.length?a.core:b.core,big=small===a.core?b.core:a.core;
-  return small.some(w=>/^[A-Z]{3,}$/.test(w)&&!['NORTH','SOUTH','EAST','WEST'].includes(w))&&small.every(w=>big.includes(w))?'partial':'none';
+  if(!a.length||!b.length)return 'none';
+  const small=a.length<=b.length?a:b,big=small===a?b:a;
+  return small.every(w=>big.includes(w))?'partial':'none';
  }
  // Names/cities: conservative whole-word containment. No generic fuzzy scoring.
  if(f===0||f===3){const x=' '+norm(p)+' ',y=' '+norm(c)+' ';if(Math.min(a.length,b.length)>=3&&(x.includes(y)||y.includes(x)))return 'partial';}
