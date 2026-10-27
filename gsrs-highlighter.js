@@ -8,6 +8,7 @@ let scope=findScope();
 if(!scope){console.warn('[GSRS] New Records or Change Records not found.');return;}
 const baseFields=[['Store Name','STORE NAME'],['Store Number','STORE NUMBER'],['PA Line 1','PA LINE1'],['PA City Name','PA CITY NAME'],['PA State Code','PA STATE CODE'],['Postal Code','PA POSTAL CODE'],['Area Code','PHONE AREA CODE'],['Phone Number','PHONE NUMBER']];
 let fields=baseFields;
+const disabledFields=new Set();
 const warned=new Set();
 const warn=s=>{if(!warned.has(s)){warned.add(s);console.warn('[GSRS] '+s);}};
 const header=s=>s.toUpperCase().replace(/^[\s\W_]*(RS|SL)(?=[\s\W_]|$)/,'').replace(/[^A-Z0-9]/g,'');
@@ -58,7 +59,7 @@ function compare(p,c,f,context={}){
  // Nearby door numbers (within 10) or overlapping ranges merit review.
  if(f===2){
   const a=addressParts(p),b=addressParts(c);
-  if(!a||!b||!compatibleHouse(a,b)||a.unit!==b.unit||a.numbers!==b.numbers)return 'none';
+  if(!a||!b||!compatibleHouse(a,b)||a.numbers!==b.numbers)return 'none';
   const small=a.core.length<=b.core.length?a.core:b.core,big=small===a.core?b.core:a.core;
   return small.some(w=>/^[A-Z]{3,}$/.test(w)&&!['NORTH','SOUTH','EAST','WEST'].includes(w))&&small.every(w=>big.includes(w))?'partial':'none';
  }
@@ -69,9 +70,8 @@ function compare(p,c,f,context={}){
 }
 const style=document.createElement('style');
 style.textContent=`
-[data-gsrs-match="exact"]{background:#dcfce7!important;color:#14532d!important;box-shadow:inset 2px 0 #16a34a!important}
-[data-gsrs-match="partial"]{background:#fef3c7!important;color:#78350f!important;box-shadow:inset 2px 0 #f59e0b!important}
-[data-gsrs-match="none"]{background:#fee2e2!important;color:#7f1d1d!important;box-shadow:inset 2px 0 #dc2626!important}
+[data-gsrs-match="exact"]{background:#edf3f0!important;color:#354b41!important;box-shadow:inset 2px 0 #8aa99a!important}
+[data-gsrs-match="partial"]{background:#f6f2e8!important;color:#62563b!important;box-shadow:inset 2px 0 #c2ad79!important}
 #gsrs-visual-panel{all:initial;box-sizing:border-box;position:fixed;right:20px;bottom:20px;z-index:2147483647;width:380px;max-width:calc(100vw - 16px);max-height:calc(100dvh - 16px);display:flex;flex-direction:column;background:#fff;color:#25312e;border:1px solid #dfe5e1;border-radius:18px;box-shadow:0 16px 60px #18382b24;font:12px/1.5 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;text-align:left;overflow:hidden}
 #gsrs-visual-panel *{box-sizing:border-box}
 #gsrs-visual-panel [data-drag]{display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid #edf0ed;cursor:grab;touch-action:none;user-select:none;flex-shrink:0}
@@ -103,7 +103,7 @@ style.textContent=`
 #gsrs-visual-panel th{font-size:10px;font-weight:500;color:#738079}
 #gsrs-visual-panel th:first-child,#gsrs-visual-panel td:first-child{text-align:left}
 #gsrs-visual-panel td:not(:first-child){font-variant-numeric:tabular-nums;font-weight:600}
-#gsrs-visual-panel td:nth-child(2){color:#23815c}#gsrs-visual-panel td:nth-child(3){color:#b07b18}#gsrs-visual-panel td:nth-child(4){color:#c15b54}
+#gsrs-visual-panel td:nth-child(2){color:#23815c}#gsrs-visual-panel td:nth-child(3){color:#b07b18}#gsrs-visual-panel td:nth-child(4){color:#738079}
 #gsrs-visual-panel [data-status]{font-size:11px;color:#738079;margin:12px 0}
 #gsrs-visual-panel .gv-actions{display:flex;gap:6px;flex-wrap:wrap}
 #gsrs-visual-panel button{font:500 11px/1.4 system-ui,sans-serif;padding:8px 10px;border:1px solid #dfe5e1;border-radius:8px;background:#fff;color:#46554c;cursor:pointer;margin:0}
@@ -131,11 +131,15 @@ style.textContent=`
 #gsrs-visual-panel .gv-window-controls button[data-window-close]:hover,#gsrs-visual-panel .gv-window-controls button[data-window-close]:focus-visible{background:#8b2525;color:#fff;filter:none}
 #gsrs-visual-panel .gv-window-controls button[data-window-close]:hover path,#gsrs-visual-panel .gv-window-controls button[data-window-close]:focus-visible path{stroke-width:2.2}
 #gsrs-visual-panel .gv-header{padding:12px 14px}
+#gsrs-visual-panel .gv-field-label{display:flex;align-items:center;gap:8px;cursor:pointer;min-height:30px}
+#gsrs-visual-panel .gv-field-label input{appearance:auto;width:16px;height:16px;margin:0;accent-color:#688b7b;flex-shrink:0;cursor:pointer}
+#gsrs-visual-panel tr[data-disabled] td{color:#929b95;font-weight:400}
+#gsrs-visual-panel .gv-options-hint{color:#69766f;font-size:11px;margin:0 0 8px}
 
 `;
 document.head.append(style);
 const panel=document.createElement('aside');panel.id='gsrs-visual-panel';panel.setAttribute('aria-label','GSRS field comparison');
-panel.innerHTML='<div data-drag tabindex="0" role="button" aria-label="Move GSRS Visuals. Drag or use arrow keys; Shift moves faster."><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAUoSURBVFhHjVfdT1xFFOcfsU353M/7sbt3d6Egn4VKK5SwtLAUsRoSQ6oWbYNWaZTGYBVqE6m1Fm1ri6UJtSgtICFNY7QPJlYfePChsQ81EkhQ0UJZWPZnZu69e2fm3qXd5Je5c+bMOb9z5sy5d7M0Ta0sKg71hsNqbziq6qMTyJoJdi7qiPs2AfGbFQ4rA2XlhSgqDmF7sYbtdAwZc2vU1wSU6GMRs8+mk5brtlgQv1mECVEMRxSEI6oxOkFFJErWWR1zzoKVizZ4EFIGgRCz0a5oghCwSPC64pr+bK7b9cmcIWBmIBOsyHhHoo5dFjEgrhEbDhnIBMNx2pARJUNMdGCHuE4IaMgKheUnIJApxaxRcf54ZCQQiQYgyW4UuLbB5c6Gx5tryA3HJmwErGeSHV9IgickwR30Q9ZkRJwIOB0Bcd7eHsf4+BimvpvA8ePH4PXlZYichS4nzr0hCYdrn8ZE226Mte5Ca0UUsiZxexkCGle1eflbMTJyCeyv/fk43J5cmh07CYsYce7XZNSXhrHwSguWu1qBI8/hk1g18gN+hqhRAywB04gku9AYq8Py8r9YX1+lBO7e/Ql+qQAhkkrbdTScR1VoEYVGf6NtN/47FMf8yy2437kXtSUaFE3OTIA1QpCbtwVDQ2eo89XVh3Ts6elGfv7WTQm4gxLeqC1F6rX9WHo1jo3X29C3p4JGb9WAjYDYiFQoqgfFJRHMzf2BjY11pFJJPHhwH4VFQQSCPptjE25Vwpt1pbgQ34lzzTX4oKGS2gyF7bUi9AG2aegVT2qht7eHRp8wsjA4+BFy87eka4HCIOGS/Dj6YilmLzbizmd78PP5Bjxbq8GrSo7NSDgCq5hMhDQJiuLB7OyvAFJIJhP45+9FVFeXQVbcHAElKKO8NIjfh5uw9E0LVidaMXOyjso1h+iFIxBbMROVOxudnR2UQCKxTLNw9eowzQ5bCyT6z9+qwcqNVsyPNmPhWjNiuyLwKRKjxwe5aQ2wmwiJW7emqfO1tUdIJB5h774G+Pz5VEcKyKjfEcDclRjmR2J4+G0zznTXoMDv50haJGxHoNeASSCdWmOj15+HpqZ6JBIrlAD5zcxMocC9jeorqh/N+6rwTncjjh1pxKGOGoTDslF4lh0xyxmOgGdMn42CvHLlSz0LiRV6Kw68sB/Z2U+hPrYDF8Y/xNmvT+Di1CnEO5rg8zM1YtTJExNgiZiQFQ8qq0qwuLiAZHKNErnz4/dwuXPQd/owLk8O4NLNfgwMHaVFp5Gmw5293batE/KKPPtoNECbU/9An5GFZaSSSXx6fgBnR9/FF2PvY3jqJGLxWkiShyPPR66kiTl2QpYEl8KoikDQT6/mvXu/AakNbCTX8dfSnzh37T1cnuxHz4mDkGWv416eREYCdiXrtavPySu6q+ug3pzItUxt4IdfbuLjr95GeVURVNVnc64TsAI0ZZscgQ52IxuJ25OD27dnKAn9t4oDLzXB6y2wnKYd2r8dzMC4a2g5c8iCkFLyvbDzmQpcvz6K6elJnB48hWBQooXHOreCEu3qMlsfyLyBJxEtDEANeFHgyqZNyuXJoZVvZUnfbz0L0RvzDAREEgwZx3MVsiXYsOs5ZsCsAWdF1pipxxPhvxd5gpZd2h/SLyaHI2CdsdXPERKy8DjYA3IkwH8RpZ2Lo/CeMKMUZSJMGxYhXWa/BUzU3GYhO6KDtK6DjFtnM2wRUAZKy6J0kgnWP2cNxcY/YgrzmZUZOpyeI0Igfv8HMUsbjI7sLrgAAAAASUVORK5CYII=" alt=""><div><div class="gv-title">GSRS Visuals</div><div class="gv-hint">Field comparison</div></div><span class="gv-grip" aria-hidden="true">⠿</span></div><div class="gv-body"><div class="gv-legend"><span style="--dot:#23815c">Exact</span><span style="--dot:#d5a33a">Partial</span><span style="--dot:#c15b54">No match</span></div><div data-summary></div><table><thead><tr><th>Field</th><th>Exact</th><th>Partial</th><th>No Match</th></tr></thead><tbody></tbody></table><div data-status role="status" aria-live="polite"></div><div class="gv-actions"><button data-refresh>Recheck</button><button data-size>Show 100</button><button data-close>Remove</button></div><div class="gv-footnote">Current page · child values only · blanks excluded</div></div>';
+panel.innerHTML='<div data-drag tabindex="0" role="button" aria-label="Move GSRS Visuals. Drag or use arrow keys; Shift moves faster."><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAUoSURBVFhHjVfdT1xFFOcfsU353M/7sbt3d6Egn4VKK5SwtLAUsRoSQ6oWbYNWaZTGYBVqE6m1Fm1ri6UJtSgtICFNY7QPJlYfePChsQ81EkhQ0UJZWPZnZu69e2fm3qXd5Je5c+bMOb9z5sy5d7M0Ta0sKg71hsNqbziq6qMTyJoJdi7qiPs2AfGbFQ4rA2XlhSgqDmF7sYbtdAwZc2vU1wSU6GMRs8+mk5brtlgQv1mECVEMRxSEI6oxOkFFJErWWR1zzoKVizZ4EFIGgRCz0a5oghCwSPC64pr+bK7b9cmcIWBmIBOsyHhHoo5dFjEgrhEbDhnIBMNx2pARJUNMdGCHuE4IaMgKheUnIJApxaxRcf54ZCQQiQYgyW4UuLbB5c6Gx5tryA3HJmwErGeSHV9IgickwR30Q9ZkRJwIOB0Bcd7eHsf4+BimvpvA8ePH4PXlZYichS4nzr0hCYdrn8ZE226Mte5Ca0UUsiZxexkCGle1eflbMTJyCeyv/fk43J5cmh07CYsYce7XZNSXhrHwSguWu1qBI8/hk1g18gN+hqhRAywB04gku9AYq8Py8r9YX1+lBO7e/Ql+qQAhkkrbdTScR1VoEYVGf6NtN/47FMf8yy2437kXtSUaFE3OTIA1QpCbtwVDQ2eo89XVh3Ts6elGfv7WTQm4gxLeqC1F6rX9WHo1jo3X29C3p4JGb9WAjYDYiFQoqgfFJRHMzf2BjY11pFJJPHhwH4VFQQSCPptjE25Vwpt1pbgQ34lzzTX4oKGS2gyF7bUi9AG2aegVT2qht7eHRp8wsjA4+BFy87eka4HCIOGS/Dj6YilmLzbizmd78PP5Bjxbq8GrSo7NSDgCq5hMhDQJiuLB7OyvAFJIJhP45+9FVFeXQVbcHAElKKO8NIjfh5uw9E0LVidaMXOyjso1h+iFIxBbMROVOxudnR2UQCKxTLNw9eowzQ5bCyT6z9+qwcqNVsyPNmPhWjNiuyLwKRKjxwe5aQ2wmwiJW7emqfO1tUdIJB5h774G+Pz5VEcKyKjfEcDclRjmR2J4+G0zznTXoMDv50haJGxHoNeASSCdWmOj15+HpqZ6JBIrlAD5zcxMocC9jeorqh/N+6rwTncjjh1pxKGOGoTDslF4lh0xyxmOgGdMn42CvHLlSz0LiRV6Kw68sB/Z2U+hPrYDF8Y/xNmvT+Di1CnEO5rg8zM1YtTJExNgiZiQFQ8qq0qwuLiAZHKNErnz4/dwuXPQd/owLk8O4NLNfgwMHaVFp5Gmw5293batE/KKPPtoNECbU/9An5GFZaSSSXx6fgBnR9/FF2PvY3jqJGLxWkiShyPPR66kiTl2QpYEl8KoikDQT6/mvXu/AakNbCTX8dfSnzh37T1cnuxHz4mDkGWv416eREYCdiXrtavPySu6q+ug3pzItUxt4IdfbuLjr95GeVURVNVnc64TsAI0ZZscgQ52IxuJ25OD27dnKAn9t4oDLzXB6y2wnKYd2r8dzMC4a2g5c8iCkFLyvbDzmQpcvz6K6elJnB48hWBQooXHOreCEu3qMlsfyLyBJxEtDEANeFHgyqZNyuXJoZVvZUnfbz0L0RvzDAREEgwZx3MVsiXYsOs5ZsCsAWdF1pipxxPhvxd5gpZd2h/SLyaHI2CdsdXPERKy8DjYA3IkwH8RpZ2Lo/CeMKMUZSJMGxYhXWa/BUzU3GYhO6KDtK6DjFtnM2wRUAZKy6J0kgnWP2cNxcY/YgrzmZUZOpyeI0Igfv8HMUsbjI7sLrgAAAAASUVORK5CYII=" alt=""><div><div class="gv-title">GSRS Visuals</div><div class="gv-hint">Field comparison</div></div><span class="gv-grip" aria-hidden="true">⠿</span></div><div class="gv-body"><div class="gv-legend"><span style="--dot:#8aa99a">Exact</span><span style="--dot:#c2ad79">Partial</span><span style="--dot:#aab1ad">No match</span></div><div data-summary></div><p class="gv-options-hint">Choose fields to compare. No match stays uncolored.</p><table><thead><tr><th>Field</th><th>Exact</th><th>Partial</th><th>No Match</th></tr></thead><tbody></tbody></table><div data-status role="status" aria-live="polite"></div><div class="gv-actions"><button data-refresh>Recheck</button><button data-size>Show 100</button><button data-close>Remove</button></div><div class="gv-footnote">Current page · child values only · blanks excluded</div></div>';
 panel.setAttribute('data-minimized','');
 const headerBar=document.createElement('div');headerBar.className='gv-header';
 headerBar.append(panel.querySelector('[data-drag]'));panel.prepend(headerBar);
@@ -216,7 +220,7 @@ function refresh(){
   const cells=Array.from(r.children),n=Math.max(0,...cells.map(c=>blocks(c).length));candidates+=n;
   // All banners are supported: compare against this record's own parent, never a hard-coded chain.
   if(!cells[map[0]]||blank(cells[map[0]].querySelector('.padding-10_1_5-margin')?.textContent||''))warn('Missing banner/store name; available fields still compared independently.');
-  map.forEach((index,f)=>{if(index<0)return;const c=cells[index],p=c?.querySelector('.padding-10_1_5-margin'),children=blocks(c);
+  map.forEach((index,f)=>{if(index<0||disabledFields.has(fields[f][1]))return;const c=cells[index],p=c?.querySelector('.padding-10_1_5-margin'),children=blocks(c);
    if(!p||children.length!==n){warn('Incomplete child alignment for '+fields[f][0]+'; affected field skipped.');return;}
    children.forEach((b,childIndex)=>{
     const areaCell=cells[map[6]],areaChildren=blocks(areaCell);
@@ -225,7 +229,20 @@ function refresh(){
    });
   });
  });
- panel.querySelector('tbody').replaceChildren(...fields.map(([label],i)=>{const r=document.createElement('tr');[label,counts[i].exact,counts[i].partial,counts[i].none].forEach(v=>{const c=document.createElement('td');c.textContent=v;r.append(c);});return r;}));
+ const body=panel.querySelector('tbody');
+ const signature=fields.map(([,name])=>name).join('|');
+ if(body.dataset.fields!==signature){
+  body.dataset.fields=signature;
+  body.replaceChildren(...fields.map(([label,name])=>{
+   const row=document.createElement('tr'),cell=document.createElement('td'),control=document.createElement('label'),input=document.createElement('input');
+   control.className='gv-field-label';input.type='checkbox';input.checked=!disabledFields.has(name);input.setAttribute('aria-label','Compare '+label);
+   input.addEventListener('change',()=>{if(input.checked)disabledFields.delete(name);else disabledFields.add(name);refresh();});
+   control.append(input,document.createTextNode(label));cell.append(control);row.append(cell);
+   for(let j=0;j<3;j++)row.append(document.createElement('td'));
+   return row;
+  }));
+ }
+ fields.forEach(([,name],i)=>{const row=body.children[i],enabled=!disabledFields.has(name);row.toggleAttribute('data-disabled',!enabled);row.querySelector('input').checked=enabled;['exact','partial','none'].forEach((kind,j)=>row.children[j+1].textContent=enabled?counts[i][kind]:'—');});
  panel.querySelector('[data-summary]').textContent=`${rows.length} parents · ${candidates} children · ${skipped} blank comparisons skipped`;
  if(!busy)status(map.includes(-1)?'Some fields unavailable; see console warnings.':'Active on this page.');
  keepPanelVisible();

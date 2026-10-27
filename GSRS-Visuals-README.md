@@ -39,12 +39,12 @@ Exact / green:
 - Standardize common street suffixes/directions and apartment/suite abbreviations.
 - Recognize US state code, full name, and [code] name representations.
 Partial / amber (called moderate for addresses):
-- Same house number and street name with missing direction or descriptive words. Door numbers up to 10 apart, or overlapping door-number ranges, are amber when the street matches. Other door-number differences remain red.
+- Same house number and street name with missing direction or descriptive words. Door numbers up to 10 apart, or overlapping door-number ranges, are amber when the street matches. Other door-number differences stay uncolored.
 - Store/city name has whole-word containment with at least three compact characters.
 - US five-digit ZIP matches the prefix of a nine-digit ZIP.
-No Match / red: other nonblank differences.
+No Match / uncolored: other nonblank differences.
 Blank on EITHER side: no highlight and excluded from Exact/Partial/No Match totals.
-Unknown address differences, route-number changes and unit-number changes remain red.
+Unknown address differences and route-number changes stay uncolored. Different or missing unit details are amber when the main address matches.
 These are deterministic comparison rules, not postal verification or GSRS match scores.
 Leading-zero removal is applied as requested, including identifiers and postal codes.
 
@@ -68,5 +68,7 @@ if your managed browser blocks activation.
 ## Phone and partial address updates
 RS and SL prefixes are detected dynamically, including underscore separators.
 Both phone columns compare the last seven digits after removing formatting, a US country code and extensions. Zeros are preserved. Parent area codes are checked against each child’s area code; local matches with area-code differences or missing area codes are partial.
-An extra business prefix or missing street words can produce a partial address match when the house number and core street name agree. Route and unit number differences remain red.
+An extra business prefix or missing street words can produce a partial address match when the house number and core street name agree. Route number differences stay uncolored; unit differences are amber when the main address matches.
 
+
+Use the checkbox beside each field to enable or disable its comparisons while Visuals is open. Disabled fields are uncolored and excluded from counts. Exact matches use muted sage; partial matches use soft amber.

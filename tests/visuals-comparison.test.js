@@ -47,8 +47,8 @@ test('addresses tolerate business prefixes and missing street words without hidi
   ['123 N Main St','123 S Main St','none'],
   ['123 Main St','123 Oak St','none'],
   ['875 Highway 69 N','875 Hwy 70 North','none'],
-  ['123 Main St Suite 2','123 Main St Suite 3','none'],
-  ['123 Main St Suite 2','123 Main St','none'],
+  ['123 Main St Suite 2','123 Main St Suite 3','partial'],
+  ['123 Main St Suite 2','123 Main St','partial'],
   ['Circle K 123 Main Rd','Circle K 123 Oak Rd','none']
  ])assert.equal(compare(p,c,2),want,JSON.stringify([p,c]));
 });
