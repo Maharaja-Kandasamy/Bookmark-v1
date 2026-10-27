@@ -72,3 +72,5 @@ Equivalent abbreviations such as Road/Rd and Mount/Mt are exact when all address
 
 
 Use the checkbox beside each field to enable or disable its comparisons while Visuals is open. Disabled fields are uncolored and excluded from counts. Exact matches use muted sage; partial matches use soft amber.
+
+Banner/address comparisons follow the supplied formatting rules: postal abbreviations, ordinal streets (First–Fourth), unambiguous direction placement, and banner And/& and spacing normalization. Corporate terms and moved The are review matches. Context-dependent signboard, chain, city/street removal, missing suite and numeric-banner decisions remain manual; records are never edited.

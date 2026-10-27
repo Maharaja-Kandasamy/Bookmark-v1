@@ -61,3 +61,44 @@ test('addresses tolerate business prefixes and missing street words without hidi
   ['Circle K 123 Main Rd','Circle K 123 Oak Rd','none']
  ])assert.equal(compare(p,c,2),want,JSON.stringify([p,c]));
 });
+
+test('provided banner rules distinguish equivalent formatting from review decisions',()=>{
+ for(const [a,b,want] of [
+ ['Alex And Erics Grocery','Alex & Erics Grocery','exact'],
+ ['J M J Food Mart','JMJ Food Mart','exact'],
+ ['Mc Donald Spirits','McDonald Spirits','exact'],
+ ['Marcella S Pizzeria','Marcellas Pizzeria','exact'],
+ ['Swarthmore Co-Op','Swarthmore Co Op','exact'],
+ ['AmericInn Motel','Americ Inn Motel','exact'],
+ ['Bubbas Bbq','Bubbas BBQ','exact'],
+ ['Fratellis Pizza & Pasta Inc','Fratellis Pizza & Pasta','partial'],
+ ['Meat Shop The','The Meat Shop','partial'],
+ ['5 Star Grocery','Five Star Grocery','none'],
+ ['Solsberry Mini Mart','Mini Mart','partial']
+ ])assert.equal(compare(a,b,0),want,a);
+});
+test('provided address abbreviations preserve named streets and numeric identities',()=>{
+ for(const [a,b,want] of [
+ ['5303 Ave N','5303 Avenue N','exact'],
+ ['1570 W Ln Rd','1570 W Lane Rd','exact'],
+ ['108 Ctr St','108 Center St','exact'],
+ ['2781 Euclid Hts Blvd','2781 Euclid Heights Blvd','exact'],
+ ['1601 Pk Loop Dr','1601 Park Loop Dr','exact'],
+ ['1510 Big Lk Rd','1510 Big Lake Rd','exact'],
+ ['1341SE Moreland Ave','1341 SE Moreland Ave','exact'],
+ ['1641Algonquin Rd','1641 Algonquin Rd','exact'],
+ ['128 Main St W','128 W Main St','exact'],
+ ['8954 County Rd E','8954 Co Rd E','exact'],
+ ['E 2578 Cty Rd S','E 2578 Co Rd S','exact'],
+ ['2171 N Hwy 151','2171 Hwy 151 N','exact'],
+ ['12 First Street','12 1st St','exact'],
+ ['12 Farm To Market 123','12 FM 123','exact'],
+ ['12 State Highway 5','12 St Hwy 5','exact'],
+ ['12 Interstate 95','12 I 95','exact'],
+ ['108 Center St','900 Center Rd','partial'],
+ ['11435 South St','900 South Rd','partial'],
+ ['108 Center St','900 Park St','none'],
+ ['5303 Avenue N','900 Avenue S','none'],
+ ['12 1/2 Main St','12 1 2 Main St','partial']
+ ])assert.equal(compare(a,b,2),want,JSON.stringify([a,b]));
+});

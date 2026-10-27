@@ -15,9 +15,29 @@ const header=s=>s.toUpperCase().replace(/^[\s\W_]*(RS|SL)(?=[\s\W_]|$)/,'').repl
 // Numeric segments lose leading zeros; punctuation/spacing/case are insignificant.
 const norm=s=>s.normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/[’']/g,'').replace(/[^A-Z0-9]+/g,' ').replace(/\d+/g,n=>n.replace(/^0+(?=\d)/,'')).trim();
 const blank=s=>!s.replace(/[\s\u200b\ufeff]/g,'');
-const words={STREET:'ST',ROAD:'RD',AVENUE:'AVE',BOULEVARD:'BLVD',DRIVE:'DR',LANE:'LN',COURT:'CT',CIRCLE:'CIR',TERRACE:'TER',PLACE:'PL',PARKWAY:'PKWY',HIGHWAY:'HWY',ROUTE:'RTE',MOUNT:'MT',FORT:'FT',CENTER:'CTR',CENTRE:'CTR',TRAIL:'TRL',TURNPIKE:'TPKE',EXPRESSWAY:'EXPY',JUNCTION:'JCT',SQUARE:'SQ',BUILDING:'BLDG',FLOOR:'FL',NORTH:'N',SOUTH:'S',EAST:'E',WEST:'W',NORTHEAST:'NE',NORTHWEST:'NW',SOUTHEAST:'SE',SOUTHWEST:'SW',APARTMENT:'UNIT',APT:'UNIT',SUITE:'UNIT',STE:'UNIT'};
+const words={STREET:'ST',ROAD:'RD',AVENUE:'AVE',BOULEVARD:'BLVD',DRIVE:'DR',LANE:'LN',COURT:'CT',CIRCLE:'CIR',TERRACE:'TER',PLACE:'PL',PARKWAY:'PKWY',HIGHWAY:'HWY',ROUTE:'RTE',MOUNT:'MT',FORT:'FT',CENTER:'CTR',CENTRE:'CTR',TRAIL:'TRL',TURNPIKE:'TPKE',EXPRESSWAY:'EXPY',JUNCTION:'JCT',SQUARE:'SQ',BUILDING:'BLDG',FLOOR:'FL',PARK:'PK',PIKE:'PKE',BYPASS:'BYP',PLAZA:'PLZ',CAUSEWAY:'CSWY',CAUSWAY:'CSWY',POINT:'PT',PORT:'PT',EXTENSION:'EXT',FREEWAY:'FWY',LAKE:'LK',CANYON:'CYN',HEIGHTS:'HTS',COUNTY:'CO',CTY:'CO',BUSINESS:'BUS',INTERSTATE:'I',FIRST:'1ST',SECOND:'2ND',THIRD:'3RD',FOURTH:'4TH',NORTH:'N',SOUTH:'S',EAST:'E',WEST:'W',NORTHEAST:'NE',NORTHWEST:'NW',SOUTHEAST:'SE',SOUTHWEST:'SW',APARTMENT:'UNIT',APT:'UNIT',SUITE:'UNIT',STE:'UNIT'};
 const states='AL:ALABAMA|AK:ALASKA|AZ:ARIZONA|AR:ARKANSAS|CA:CALIFORNIA|CO:COLORADO|CT:CONNECTICUT|DE:DELAWARE|DC:DISTRICT OF COLUMBIA|FL:FLORIDA|GA:GEORGIA|HI:HAWAII|ID:IDAHO|IL:ILLINOIS|IN:INDIANA|IA:IOWA|KS:KANSAS|KY:KENTUCKY|LA:LOUISIANA|ME:MAINE|MD:MARYLAND|MA:MASSACHUSETTS|MI:MICHIGAN|MN:MINNESOTA|MS:MISSISSIPPI|MO:MISSOURI|MT:MONTANA|NE:NEBRASKA|NV:NEVADA|NH:NEW HAMPSHIRE|NJ:NEW JERSEY|NM:NEW MEXICO|NY:NEW YORK|NC:NORTH CAROLINA|ND:NORTH DAKOTA|OH:OHIO|OK:OKLAHOMA|OR:OREGON|PA:PENNSYLVANIA|RI:RHODE ISLAND|SC:SOUTH CAROLINA|SD:SOUTH DAKOTA|TN:TENNESSEE|TX:TEXAS|UT:UTAH|VT:VERMONT|VA:VIRGINIA|WA:WASHINGTON|WV:WEST VIRGINIA|WI:WISCONSIN|WY:WYOMING|PR:PUERTO RICO'.split('|').map(s=>s.split(':'));
-function canonical(s,f){let v=norm(s);if(f===2)return norm(s.replace(/#/g,' UNIT ')).split(' ').map(w=>words[w]||w).join(' ');if(f===4){const state=states.find(([c,n])=>[c,n,c+' '+n].includes(v));if(state)v=state[0];}return v.replace(/ /g,'');}
+function addressTokens(s){
+ s=s.replace(/#/g,' UNIT ').replace(/(\d)(?!(?:st|nd|rd|th)\b)(?=[A-Za-z]{2})/gi,'$1 ').replace(/\//g,' FRACTION ').replace(/\bFARM\s+TO\s+MARKET\b/gi,'FM').replace(/\bRURAL\s+ROUTE\b/gi,'RR').replace(/\bSTATE\s+(HIGHWAY|HWY|ROUTE|RTE)\b/gi,'ST $1').replace(/&/g,' AND ');
+ return norm(s).split(' ').map(w=>words[w]||w);
+}
+function addressKey(s){
+ const tokens=addressTokens(s);
+ // Move an unambiguous trailing direction across a named physical street.
+ const unit=tokens.findIndex(w=>['UNIT','BLDG','FL'].includes(w)),end=unit<0?tokens.length:unit;
+ if(end>=4&&['N','S','E','W','NE','NW','SE','SW'].includes(tokens[end-1])&&['ST','RD','DR','LN','AVE','PKWY','BLVD','CT','PL','TER'].includes(tokens[end-2])&&!tokens.some(w=>['HWY','RTE','RR','FM','I'].includes(w))&&/^\d+[A-Z]?$/.test(tokens[0])){
+  tokens.splice(1,0,tokens.splice(end-1,1)[0]);
+ }
+ if(/^\d+$/.test(tokens[0])&&['N','S','E','W','NE','NW','SE','SW'].includes(tokens[1])&&['HWY','RTE'].includes(tokens[2])&&/^\d+$/.test(tokens[3])){const direction=tokens.splice(1,1)[0];tokens.splice(end-1,0,direction);}
+ return tokens.join(' ');
+}
+function bannerKey(s){
+ return norm(s.replace(/&/g,' AND ')).replace(/\bMC\s+(?=[A-Z])/g,'MC').replace(/\b([A-Z]+) S\b/g,'$1S').replace(/ /g,'');
+}
+function bannerReviewKey(s){
+ return norm(s.replace(/&/g,' AND ')).replace(/\b(ACCOUNTING|ADVERTISING|BILLING|CO|COMPANY|COS|DIST|DISTRIBUTION|DISTRIBUTOR|ENT|ENTERPRISES|HEADQUARTERS|HQ|INC|LLC|REGION|WAREHOUSE|WHSE)\b/g,' ').replace(/\bNO\s+B\s*W?\s*L?$/,'').replace(/\bNO\s+BWL$/,'').replace(/^THE\s+|\s+THE$/g,'').replace(/\s+/g,' ').trim();
+}
+function canonical(s,f){let v=norm(s);if(f===0)return bannerKey(s);if(f===2)return addressKey(s);if(f===4){const state=states.find(([c,n])=>[c,n,c+' '+n].includes(v));if(state)v=state[0];}return v.replace(/ /g,'');}
 function phone(s){
  let digits=s.replace(/(?:\bext(?:ension)?\.?|\bx|#)\s*\d+\s*$/i,'').replace(/\D/g,'');
  if(digits.length===11&&digits[0]==='1')digits=digits.slice(1);
@@ -26,13 +46,18 @@ function phone(s){
 function addressParts(s){
  // Drop the house/range and business prefix before comparing the street itself.
  s=s.replace(/#/g,' UNIT ').replace(/(^|\s)(\d+)\s*[-–—]\s*\d+(?=\s|$)/,'$1$2');
- const tokens=norm(s).split(' ').map(w=>words[w]||w),start=tokens.findIndex(w=>/^\d+[A-Z]?$/.test(w));
+ const tokens=addressTokens(s),start=tokens.findIndex(w=>/^\d+[A-Z]?$/.test(w));
  const rest=tokens.slice(start<0?0:start+1);
  const unit=rest.findIndex(w=>['UNIT','BLDG','FL'].includes(w));
  const street=unit<0?rest:rest.slice(0,unit);
- const types=new Set(['ST','RD','AVE','BLVD','DR','LN','CT','CIR','TER','PL','PKWY','HWY','RTE','ROUT','CTR','TRL','TPKE','EXPY','JCT','SQ']);
+ const types=new Set(['ST','RD','AVE','BLVD','DR','LN','CT','CIR','TER','PL','PKWY','HWY','RTE','ROUT','CTR','TRL','TPKE','EXPY','JCT','SQ','PKE','BYP','PLZ','CSWY','EXT','FWY']);
  const directions=new Set(['N','S','E','W','NE','NW','SE','SW']);
- return street.filter(w=>!types.has(w)&&!directions.has(w));
+ // Remove only a suffix or route designator; Lane/Center/South can be street names.
+ const core=street.slice();
+ if(core.length>2&&directions.has(core[0]))core.shift();
+ if(core.length>2&&directions.has(core[core.length-1])&&types.has(core[core.length-2]))core.pop();
+ if(types.has(core[core.length-1]))core.pop();
+ return core.filter((w,i)=>!(types.has(w)&&/^[0-9]+$/.test(core[i+1]||'')));
 }
 function compare(p,c,f,context={}){
  if(blank(p)||blank(c))return null;
@@ -51,6 +76,7 @@ function compare(p,c,f,context={}){
   const small=a.length<=b.length?a:b,big=small===a?b:a;
   return small.every(w=>big.includes(w))?'partial':'none';
  }
+ if(f===0){const x=bannerReviewKey(p),y=bannerReviewKey(c);if(x&&y&&bannerKey(x)===bannerKey(y))return 'partial';}
  // Names/cities: conservative whole-word containment. No generic fuzzy scoring.
  if(f===0||f===3){const x=' '+norm(p)+' ',y=' '+norm(c)+' ';if(Math.min(a.length,b.length)>=3&&(x.includes(y)||y.includes(x)))return 'partial';}
  if(f===5&&/^\d+$/.test(a)&&/^\d+$/.test(b)&&((a.length===5&&b.length===9&&b.startsWith(a))||(b.length===5&&a.length===9&&a.startsWith(b))))return 'partial';
