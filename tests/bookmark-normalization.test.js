@@ -207,3 +207,26 @@ test('numbered routes remain searchable and keep suite information for ranking',
  assert.equal(ranked[0].candidate.slId,'1');
  assert.equal(engine.addressWildcard('135 STE A'),'');
 });
+
+
+test('generic business descriptors are omitted from every banner search without changing identity',()=>{
+ for(const descriptor of ['store','stores','C STORE','c-store','cstore','convenience stores','pump','pumps','hotel','hotels','motel','motels','dispensary','dispensaries','shop','shops']){
+  const bannerName='QUICK STOP '+descriptor+' 5';
+  assert.equal(engine.wildcardWords(bannerName,'banner'),'quic*stop*',descriptor);
+  const plan=engine.createSearchPlan({bannerName,zip:'46805',storeNumber:'5'});
+  assert.ok(plan.some(q=>q.type==='banner-wildcard-zip'));
+  assert.ok(plan.some(q=>q.type==='store-banner'));
+  plan.filter(q=>q.fields.banner).forEach(q=>assert.equal(q.fields.banner,'quic*stop*'));
+ }
+ assert.equal(engine.wildcardWords('Quick Shop Stop','banner'),'quic*stop*');
+ assert.equal(engine.wildcardWords('Shop Quick Stop','banner'),'*quic*stop*');
+ assert.equal(engine.wildcardWords('Shoprite Pumpkins Hotelier','banner'),'shop*pump*hote*');
+ assert.equal(engine.wildcardWords('Stores and Shops LLC','banner'),'');
+ assert.equal(engine.createSearchPlan({bannerName:'Stores and Shops LLC',zip:'46805'}).length,0);
+ const source=engine.normalizeSource({bannerName:'QUICK STOP C STORE 5',address:'651 E STATE BLVD',city:'FORT WAYNE',state:'IN',zip:'46805'});
+ assert.equal(source.bannerName,'QUICK STOP C STORE 5');
+ assert.equal(source.bannerKey,'quick stop c store 5');
+ assert.equal(source.storeNumber,'');
+ const cleanPlan=engine.createSearchPlan({bannerName:'Quick Stop Store',zip:'46805'});
+ assert.equal(cleanPlan.find(q=>q.type==='banner-exact-zip').fields.banner,'quick stop');
+});

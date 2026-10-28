@@ -82,6 +82,8 @@
     return [house,...words].filter(Boolean).join('*')+'*';
   }
 
+  const bannerDescriptors = new Set('store stores cstore cstores convenience pump pumps hotel hotels motel motels dispensary dispensaries shop shops'.split(' '));
+
   function bannerSearchWords(value) {
     const text = withoutBannerStoreNumber(value).replace(/<[^>]*>/g, ' ')
       .replace(/&(?:[a-z]+|#\d+|#x[a-f0-9]+);/gi, ' ')
@@ -90,7 +92,7 @@
       .replace(/\d+/g, ' ')
       .replace(/&/g, ' ');
     const words = normalizeWords(text).split(' ').filter(word => word.length > 1 && !/^\d{7,}$/.test(word) && !['undefined','null','nan','and'].includes(word));
-    return normalizeBanner(words.join(' ')).split(' ').filter(word => word.length > 1);
+    return normalizeBanner(words.join(' ')).split(' ').filter(word => word.length > 1 && !bannerDescriptors.has(word));
   }
 
   function wildcardWords(value, kind) {
