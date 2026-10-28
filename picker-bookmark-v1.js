@@ -8,7 +8,7 @@
     ['street', 'st'], ['st', 'st'], ['road', 'rd'], ['rd', 'rd'],
     ['avenue', 'ave'], ['ave', 'ave'], ['boulevard', 'blvd'], ['blvd', 'blvd'],
     ['drive', 'dr'], ['dr', 'dr'], ['lane', 'ln'], ['ln', 'ln'],
-    ['highway', 'hwy'], ['hwy', 'hwy'], ['route', 'rte'], ['rte', 'rte'],
+    ['highway', 'hwy'], ['hwy', 'hwy'], ['route', 'rte'], ['rte', 'rte'], ['rt', 'rte'],
     ['west', 'w'], ['east', 'e'], ['north', 'n'], ['south', 's']
   ]);
 
@@ -57,7 +57,10 @@
   }
 
   function addressSearchParts(value) {
-    const words = normalizeWords(splitAddress(value).base).split(' ').filter(Boolean);
+    const base = normalizeWords(splitAddress(value).base);
+    const numberedRoute = /^(?:(\d+[a-z]?)\s+)?(?:(?:us|u s|state|county|co|north|south|east|west|n|s|e|w)\s+)*(?:rt|rte|route|hwy|highway|sr|cr)\s*(\d+[a-z]?)\b/.exec(base);
+    if (numberedRoute) return {houseNumber: numberedRoute[1] || '', street: [numberedRoute[2]], numberedRoute: true};
+    const words = base.split(' ').filter(Boolean);
     const houseIndex = words.findIndex(word => /^\d+[a-z]?$/.test(word));
     const houseNumber = houseIndex >= 0 ? words[houseIndex] : '';
     const street = [];
@@ -71,9 +74,10 @@
     return {houseNumber, street};
   }
   function addressWildcard(value) {
-    const {houseNumber,street} = addressSearchParts(value);
+    const {houseNumber,street,numberedRoute} = addressSearchParts(value);
     if (!street.length) return '';
     const house = houseNumber ? houseNumber.slice(0, Math.max(1,houseNumber.length-(houseNumber.length>4?2:1))) : '';
+    if (numberedRoute) return (house ? house + '*' : '*') + street[0] + '*';
     const words = street.map(word => /^\d+$/.test(word) ? word : word.slice(0,Math.max(1,word.length-2)));
     return [house,...words].filter(Boolean).join('*')+'*';
   }

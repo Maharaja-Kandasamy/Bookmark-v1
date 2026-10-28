@@ -187,3 +187,23 @@ test('numeric-only brands keep their digits while hashtag store numbers stay sep
  assert.equal(storeQuery.fields.banner,'*76*');
  assert.equal(engine.wildcardWords('#00123','banner'),'');
 });
+
+
+test('numbered routes remain searchable and keep suite information for ranking',()=>{
+ for(const address of ['RT 135 STE A','RTE 135 UNIT A','Route 135 Suite A','State Route 135 STE A','US HWY 135 STE A','SR 135 STE A','CR 135 STE A']){
+  assert.equal(engine.addressWildcard(address),'*135*',address);
+  const plan=engine.createSearchPlan({address,city:'Austin',zip:'78701'});
+  assert.equal(plan.find(q=>q.type==='address-city').fields.address,'*135*');
+  assert.equal(plan.find(q=>q.type==='address-zip').fields.address,'*135*');
+  assert.equal(engine.normalizeSource({address}).unitKey,'a');
+ }
+ assert.equal(engine.addressWildcard('5121 RT 135 STE A'),'512*135*');
+ assert.equal(engine.addressWildcard('RT 135A STE B'),'*135a*');
+ assert.equal(engine.normalizeAddress('RT 135 STE A'),engine.normalizeAddress('Route 135 Suite A'));
+ const ranked=engine.consolidateCandidates({address:'RT 135 STE A'},[
+  {candidate:{slId:'2',address:'Route 135 Suite B'}},
+  {candidate:{slId:'1',address:'Route 135 Suite A'}}
+ ]);
+ assert.equal(ranked[0].candidate.slId,'1');
+ assert.equal(engine.addressWildcard('135 STE A'),'');
+});
