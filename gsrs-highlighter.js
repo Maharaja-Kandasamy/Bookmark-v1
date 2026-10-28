@@ -67,6 +67,17 @@ function addressParts(s){
  if(types.has(core[core.length-1]))core.pop();
  return core.filter((w,i)=>!(types.has(w)&&/^[0-9]+$/.test(core[i+1]||'')));
 }
+function eligibleStatus(value){return /^\s*\[(FO|NA|OP)\]/i.test(value);}
+function nearStreetWord(a,b){
+ if(!/^[A-Z]{4,}$/.test(a)||!/^[A-Z]{4,}$/.test(b)||Math.abs(a.length-b.length)>1)return false;
+ if(a.length===b.length){
+  const differences=[];for(let i=0;i<a.length;i++)if(a[i]!==b[i])differences.push(i);
+  return differences.length===1||(differences.length===2&&differences[1]===differences[0]+1&&a[differences[0]]===b[differences[1]]&&a[differences[1]]===b[differences[0]]);
+ }
+ const short=a.length<b.length?a:b,long=a.length<b.length?b:a;
+ let i=0;while(i<short.length&&short[i]===long[i])i++;
+ return short.slice(i)===long.slice(i+1);
+}
 function compare(p,c,f,context={}){
  if(blank(p)||blank(c))return null;
  if(f===5){
@@ -88,7 +99,11 @@ function compare(p,c,f,context={}){
   const a=addressParts(p),b=addressParts(c);
   if(!a.length||!b.length)return 'none';
   const small=a.length<=b.length?a:b,big=small===a?b:a;
-  return small.every(w=>big.includes(w))?'partial':'none';
+  if(small.every(w=>big.includes(w)))return 'partial';
+  // Only one alphabetic street word may differ; numeric route identities stay strict.
+  if(a.length!==b.length)return 'none';
+  const differences=a.map((word,i)=>word===b[i]?null:[word,b[i]]).filter(Boolean);
+  return differences.length===1&&nearStreetWord(...differences[0])?'partial':'none';
  }
  if(f===0){const x=bannerReviewKey(p),y=bannerReviewKey(c);if(x&&y&&bannerKey(x)===bannerKey(y))return 'partial';}
  // Names/cities: conservative whole-word containment. No generic fuzzy scoring.
@@ -240,16 +255,22 @@ function refresh(){
  const heads=Array.from(t.querySelector('thead tr')?.children||[]);
  fields=heads.some(h=>header(h.textContent)==='PHONE')?[...baseFields,['Phone','PHONE']]:baseFields;
  const map=fields.map(([,n])=>{const found=heads.map((h,i)=>header(h.textContent)===header(n)?i:-1).filter(i=>i>=0);if(found.length!==1){warn('Missing or ambiguous header: '+n);return -1;}return found[0];});
- const counts=fields.map(()=>({exact:0,partial:0,none:0}));let candidates=0,skipped=0;
+ const statusHeaders=heads.map((h,i)=>header(h.textContent)==='STORESTATUS'?i:-1).filter(i=>i>=0);
+ const statusIndex=statusHeaders.length===1?statusHeaders[0]:-1;
+ const counts=fields.map(()=>({exact:0,partial:0,none:0}));let candidates=0,skipped=0,excluded=0;
  t.querySelectorAll('[data-gsrs-match]').forEach(e=>e.removeAttribute('data-gsrs-match'));
  const rows=t.querySelectorAll('tbody > tr.newRecordParent');
  rows.forEach(r=>{
   const cells=Array.from(r.children),n=Math.max(0,...cells.map(c=>blocks(c).length));candidates+=n;
+  const statuses=blocks(cells[statusIndex]);
+  const eligible=Array.from({length:n},(_,i)=>statuses.length===n&&eligibleStatus(statuses[i].textContent));
+  excluded+=eligible.filter(value=>!value).length;
   // All banners are supported: compare against this record's own parent, never a hard-coded chain.
   if(!cells[map[0]]||blank(cells[map[0]].querySelector('.padding-10_1_5-margin')?.textContent||''))warn('Missing banner/store name; available fields still compared independently.');
   map.forEach((index,f)=>{if(index<0||disabledFields.has(fields[f][1]))return;const c=cells[index],p=c?.querySelector('.padding-10_1_5-margin'),children=blocks(c);
    if(!p||children.length!==n){warn('Incomplete child alignment for '+fields[f][0]+'; affected field skipped.');return;}
    children.forEach((b,childIndex)=>{
+    if(!eligible[childIndex])return;
     const areaCell=cells[map[6]],areaChildren=blocks(areaCell);
     const context={parentArea:areaCell?.querySelector('.padding-10_1_5-margin')?.textContent||'',childArea:areaChildren.length===n?areaChildren[childIndex]?.textContent||'':''};
     const result=compare(p.textContent,b.textContent,f,context);if(!result){skipped++;return;}b.setAttribute('data-gsrs-match',result);counts[f][result]++;
@@ -270,8 +291,8 @@ function refresh(){
   }));
  }
  fields.forEach(([,name],i)=>{const row=body.children[i],enabled=!disabledFields.has(name);row.toggleAttribute('data-disabled',!enabled);row.querySelector('input').checked=enabled;['exact','partial','none'].forEach((kind,j)=>row.children[j+1].textContent=enabled?counts[i][kind]:'—');});
- panel.querySelector('[data-summary]').textContent=`${rows.length} parents · ${candidates} children · ${skipped} blank comparisons skipped`;
- if(!busy)status(map.includes(-1)?'Some fields unavailable; see console warnings.':'Active on this page.');
+ panel.querySelector('[data-summary]').textContent=`${rows.length} parents · ${candidates} children · ${excluded} excluded by status · ${skipped} blank comparisons skipped`;
+ if(!busy)status(statusIndex<0?'Store status unavailable; highlights paused.':map.includes(-1)?'Some fields unavailable; see console warnings.':'Active on this page.');
  keepPanelVisible();
 }
 // Relative XPath avoids repeated demo-simple-select IDs and unrelated pagination controls.

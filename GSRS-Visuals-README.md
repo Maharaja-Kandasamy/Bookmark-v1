@@ -74,3 +74,5 @@ Equivalent abbreviations such as Road/Rd and Mount/Mt are exact when all address
 Use the checkbox beside each field to enable or disable its comparisons while Visuals is open. Disabled fields are uncolored and excluded from counts. Exact matches use muted sage; partial matches use soft amber.
 
 Banner/address comparisons follow the supplied formatting rules: postal abbreviations, ordinal streets (First–Fourth), unambiguous direction placement, and banner And/& and spacing normalization. Corporate terms and moved The are review matches. Context-dependent signboard, chain, city/street removal, missing suite and numeric-banner decisions remain manual; records are never edited.
+
+Child status gating: only bracketed FO, NA and OP in STORE STATUS qualify. Other, blank, missing or misaligned statuses are excluded from every comparison and count. A single one-edit alphabetic street-word difference (minimum four letters each), including an adjacent transposition, is partial only; numeric route differences remain unmatched.

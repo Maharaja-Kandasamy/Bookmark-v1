@@ -1,8 +1,8 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const src=fs.readFileSync(path.join(__dirname,'../gsrs-highlighter.js'),'utf8').split("const style=document.createElement('style');")[0];
 const context={window:{},document:{querySelectorAll:()=>[{closest:()=>null,getClientRects:()=>[{}]}]},console};
-vm.createContext(context);vm.runInContext(src+'globalThis.rules={compare,header};})();',context);
-const {compare,header}=context.rules;
+vm.createContext(context);vm.runInContext(src+'globalThis.rules={compare,header,eligibleStatus};})();',context);
+const {compare,header,eligibleStatus}=context.rules;
 test('RS and SL prefixes map the same fields with punctuation or whitespace',()=>{
  for(const name of ['RS STORE NAME','SL STORE NAME','RS_STORE_NAME','SL_STORE_NAME','SL PA LINE1'])assert.equal(header(name),name.includes('LINE1')?'PALINE1':'STORENAME');
 });
@@ -113,4 +113,17 @@ test('postal comparison restores leading zeros and preserves ZIP+4 digits',()=>{
  ['987-7678','00987-7679','none'],['987','00988','none'],
  ['987-078','00987-0078','none'],['','00987',null]
  ])assert.equal(compare(a,b,5),want,JSON.stringify([a,b]));
+});
+
+test('only explicitly allowed child statuses qualify for comparison',()=>{
+ for(const s of ['[FO] Future Opening','[NA] Inactive/Not Verified','[OP] Open, Operating'])assert.equal(eligibleStatus(s),true);
+ for(const s of ['[TC] Closed','[UV] Unverifiable','','Open, Operating','[OTHER]','[OPX]'])assert.equal(eligibleStatus(s),false);
+});
+test('a single small street spelling difference is amber, not an exact match',()=>{
+ for(const [a,b,want] of [
+ ['1344 Mains St','1344 Main St','partial'],['1344 Main St','1344 Mains St','partial'],
+ ['1344 Mian St','1344 Main St','partial'],['1344 Maim St','1344 Main St','partial'],
+ ['1344 Main St','1344 Main St','exact'],['1344 Main St','1344 Oak St','none'],
+ ['1344 Highway 151','1344 Highway 152','none'],['1344 Mains Oak St','1344 Main Oaks St','none']
+ ])assert.equal(compare(a,b,2),want,JSON.stringify([a,b]));
 });
