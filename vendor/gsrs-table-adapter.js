@@ -26,33 +26,35 @@
     const area=String(row.areaCode||'').replace(/\D/g,'');const phone=String(row.phone||'').replace(/\D/g,'');
     if(area||phone)row.phone=phone.startsWith(area)&&area?phone:`${area}${phone}`;delete row.areaCode;
     const allAliases=new Set(Object.values(normalizedProfiles[profile]||{}).flat());const useful=new Set(names.map((name,index)=>allAliases.has(name)?index:-1).filter(index=>index>=0));row.copyFields=headers.map((header,index)=>({header:clean(header),value:clean(cells[index]),index})).filter(x=>useful.has(x.index)&&x.header&&x.value).map(({header,value})=>({header,value}));return row;}
-  function modelFromTable(table){
+  function modelFromTable(table,sourceOnly=false,selectedSource=false){
     if(Array.isArray(table?.headers)&&Array.isArray(table?.rows))return table;
     const headers=[...table.querySelectorAll('thead th')].map(cell=>clean(cell.getAttribute('title')||cell.querySelector('[title]')?.getAttribute('title')||cell.textContent));
     const elements=[...table.querySelectorAll('tbody tr')].filter(row=>row.querySelector('td'));
-    const rows=elements.map(row=>[...row.querySelectorAll('td')].map(cell=>clean(cell.textContent)));
-    const selectedIndexes=elements.map((row,index)=>row.matches('.Mui-selected,.selected,.highlighted,[aria-selected="true"],[data-selected="true"]')?index:-1).filter(index=>index>=0);
-    return{headers,rows,selectedIndexes};
+    let selectedIndexes=elements.map((row,index)=>row.matches('.Mui-selected,.selected,.highlighted,[aria-selected="true"],[data-selected="true"]')?index:-1).filter(index=>index>=0);
+    const chosen=(selectedSource||sourceOnly)&&selectedIndexes.length===1?[elements[selectedIndexes[0]]]:sourceOnly?elements.slice(0,1):elements;
+    if((selectedSource||sourceOnly)&&selectedIndexes.length===1)selectedIndexes=[0];
+    const rows=chosen.map(row=>[...row.querySelectorAll('td')].map(cell=>clean(cell.textContent)));
+    return{headers,rows,selectedIndexes,sourceRowCount:elements.length};
   }
-  function modelFromConfiguredXpaths(root){const doc=root?.ownerDocument||root;if(!doc?.evaluate)return null;const XR=doc.defaultView?.XPathResult||globalThis.XPathResult;if(!XR)return null;const first=xpath=>doc.evaluate(xpath,doc,null,XR.FIRST_ORDERED_NODE_TYPE,null).singleNodeValue;const table=first(TABLE_XPATH);const header=first(HEADER_XPATH);const client=first(CLIENT_ROW_XPATH);if(!table||!header||!client||table.closest?.('[data-testid="manual-match-search-table"]'))return null;const headers=[...header.querySelectorAll('th')].map(cell=>clean(cell.getAttribute('title')||cell.querySelector('[title]')?.getAttribute('title')||cell.textContent));const rowCells=row=>[...row.querySelectorAll('td')].map(cell=>clean(cell.textContent));const result=doc.evaluate(CANDIDATE_ROWS_XPATH,doc,null,XR.ORDERED_NODE_SNAPSHOT_TYPE,null);const candidates=[];for(let i=0;i<result.snapshotLength;i++)candidates.push(rowCells(result.snapshotItem(i)));return{headers,rows:[rowCells(client),...candidates]};}
+  function modelFromConfiguredXpaths(root,sourceOnly=false){const doc=root?.ownerDocument||root;if(!doc?.evaluate)return null;const XR=doc.defaultView?.XPathResult||globalThis.XPathResult;if(!XR)return null;const first=xpath=>doc.evaluate(xpath,doc,null,XR.FIRST_ORDERED_NODE_TYPE,null).singleNodeValue;const table=first(TABLE_XPATH);const header=first(HEADER_XPATH);const client=first(CLIENT_ROW_XPATH);if(!table||!header||!client||table.closest?.('[data-testid="manual-match-search-table"]'))return null;const headers=[...header.querySelectorAll('th')].map(cell=>clean(cell.getAttribute('title')||cell.querySelector('[title]')?.getAttribute('title')||cell.textContent));const rowCells=row=>[...row.querySelectorAll('td')].map(cell=>clean(cell.textContent));const result=sourceOnly?{snapshotLength:0}:doc.evaluate(CANDIDATE_ROWS_XPATH,doc,null,XR.ORDERED_NODE_SNAPSHOT_TYPE,null);const candidates=[];for(let i=0;i<result.snapshotLength;i++)candidates.push(rowCells(result.snapshotItem(i)));return{headers,rows:[rowCells(client),...candidates]};}
   function extractSourceAndCandidates(table,requestedProfile){const model=modelFromTable(table);if(!model.headers.length)return{error:'source-headers-not-found'};const detected=detectProfile(model.headers);const effective=requestedProfile==='custom'?'storeView':requestedProfile||detected;if(detected==='unknown'||detected==='ambiguous')return{error:`profile-${detected}`};if(effective!==detected)return{error:'profile-mismatch',detectedProfile:detected,requestedProfile};if(!model.rows.length)return{error:'source-row-not-found'};const rows=model.rows.map(cells=>extractRow(model.headers,cells,detected));return{profile:detected,headers:model.headers,source:rows[0],candidates:rows.slice(1),sourceRowCount:model.rows.length,initialCandidateCount:Math.max(0,model.rows.length-1)};}
-  function extractFromDocument(root,requestedProfile){
+  function extractFromDocument(root,requestedProfile,options={}){
     const scoped=findScopedTable(root,'source');
     if(scoped.table){
-      const model=modelFromTable(scoped.table);
+      const model=modelFromTable(scoped.table,options.includeCandidates===false,true);
       if(model.selectedIndexes?.length>1)return{error:'multiple-highlighted-rows'};
       if(model.selectedIndexes?.length===1){
         const source=extractSourceAndCandidates({headers:model.headers,rows:[model.rows[model.selectedIndexes[0]]]},requestedProfile);
         if(source.error)return source;
-        const results=findScopedTable(root,'results');
+        const results=options.includeCandidates===false?{}:findScopedTable(root,'results');
         const candidates=[];
         if(results.table){const resultModel=modelFromTable(results.table),profile=detectProfile(resultModel.headers);if(normalizedProfiles[profile])for(const cells of resultModel.rows)candidates.push(extractRow(resultModel.headers,cells,profile));}
-        return{...source,candidates,sourceRowCount:model.rows.length,initialCandidateCount:candidates.length};
+        return{...source,candidates,sourceRowCount:model.sourceRowCount??model.rows.length,initialCandidateCount:candidates.length};
       }
-      return extractSourceAndCandidates(scoped.table,requestedProfile);
+      return extractSourceAndCandidates(model,requestedProfile);
     }
     if(scoped.error==='multiple-source-tables')return scoped;
-    const configured=modelFromConfiguredXpaths(root);
+    const configured=modelFromConfiguredXpaths(root,options.includeCandidates===false);
     if(configured)return extractSourceAndCandidates(configured,requestedProfile);
     return scoped;
   }

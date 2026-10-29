@@ -28,3 +28,10 @@ test('shared Search button is preferred and hidden automation buttons are ignore
  dialog.querySelectorAll=()=>[actual,other,button('search-button',true)];assert.equal(A.findSearchButton(dialog).button,actual);
  dialog.querySelectorAll=()=>[other,button('another')];assert.match(A.findSearchButton(dialog).error,/Multiple/);
 });
+
+test('restoration attempts all field values even when a checkbox fails',()=>{
+ const {A,dialog}=setup();const one={value:'',isConnected:true,dispatchEvent(){}},two={value:'',isConnected:true,dispatchEvent(){}};
+ const broken={checked:false,isConnected:true,click(){throw Error('Detached handler');}};
+ const result=A.restoreFields({dialog,fields:[{checkbox:broken,checked:true,input:one,value:'first saved field'},{input:two,value:'second saved field'}]});
+ assert.equal(result.ok,false);assert.equal(one.value,'first saved field');assert.equal(two.value,'second saved field');
+});

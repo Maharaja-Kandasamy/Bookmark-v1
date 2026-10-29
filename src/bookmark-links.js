@@ -54,7 +54,10 @@
     } catch (error) {
       return {status:'incomplete',diagnostic:`Ranked TD search failed: ${error.message}`,value};
     } finally {
-      if (!options.isCurrent || options.isCurrent()) Adapter.restoreFields(snapshot);
+      if (!options.isCurrent || options.isCurrent()) {
+        const restored=Adapter.restoreFields(snapshot);
+        if(restored?.ok===false)return {status:'incomplete',value,diagnostic:restored.diagnostic};
+      }
     }
   }
   root.PickerBookmarkLinks = {findTdField,execute};

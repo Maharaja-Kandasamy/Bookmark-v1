@@ -151,8 +151,8 @@
     const table = byTestId(dialog, 'manual-match-search-table');
     return table ? `${table.querySelectorAll('tbody tr').length}|${table.textContent.replace(/\s+/g, ' ').trim()}` : 'missing';
   };
-  const resultObservationRoot = dialog => byTestId(dialog, 'manual-match-search-table')?.parentElement || byTestId(dialog, 'manual-match-search-table');
-  const isResultActivity = (records, resultRoot) => !!resultRoot && (records || []).some(record => resultRoot.contains?.(record.target));
+  const resultObservationRoot = dialog => byTestId(dialog, 'manual-match-search-table');
+  const isResultActivity = (records,resultRoot) => !!resultRoot && (records || []).some(record => resultRoot.contains?.(record.target) || [...(record.addedNodes || []),...(record.removedNodes || [])].some(node => node===resultRoot || node.matches?.('[data-testid="manual-match-search-table"]') || node.querySelector?.('[data-testid="manual-match-search-table"]')));
 
   function extractRows(dialog = findDialog()) {
     const table = byTestId(dialog, 'manual-match-search-table');
@@ -179,73 +179,96 @@
     return submitAndWait(dialog, search, options);
   }
 
-  function submitAndWait(dialog, search, options = {}) {
-    const timeoutMs = options.timeoutMs || 30000;
-    const stableMs = options.stableMs || 1500;
-    if (options.signal?.aborted) return Promise.resolve({status:'incomplete',rows:[],diagnostic:'Search cancelled'});
-    const before = tableSignature(dialog);
-    const startedAt = Date.now();
-    search.click();
+  function submitAndWait(dialog,search,options={}) {
+    const timeoutMs=options.timeoutMs || 30000,stableMs=options.stableMs || 600;
+    if(options.signal?.aborted)return Promise.resolve({status:'incomplete',rows:[],diagnostic:'Search cancelled'});
     return new Promise(resolve => {
-      let finished = false;
-      let lastSignature = before;
-      let stableSince = 0;
-      let sawMutation = false;
-      let sawBusy = false;
-      const finish = result => {
-        if (finished) return;
-        finished = true; clearInterval(timer); clearTimeout(deadline);
-        observer?.disconnect(); resolve(result);
+      let finished=false,timer,deadline,pending,observer,before,lastSignature,stableSince=0,sawMutation=false,sawBusy=false,dirty=true;
+      let observedRoot=resultObservationRoot(dialog);
+      const observationOptions={childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['aria-busy']};
+      const finish=result=>{
+        if(finished)return;finished=true;
+        clearInterval(timer);clearTimeout(deadline);clearTimeout(pending);observer?.disconnect();
+        options.signal?.removeEventListener('abort',onAbort);resolve(result);
       };
-      const check = () => {
-        const liveDialog = findDialog();
-        if (options.isCurrent && !options.isCurrent()) return finish({ status: 'incomplete', rows: [], diagnostic: 'Source record changed' });
-        if (!liveDialog) return finish({ status: 'incomplete', rows: [], diagnostic: 'Manual Match dialog closed during search' });
-        const signature = tableSignature(liveDialog);
-        const busy = !!liveDialog.querySelector('[aria-busy="true"], .MuiCircularProgress-root, [role="progressbar"]') || search.disabled;
-        if (busy) sawBusy = true;
-        if (signature !== lastSignature) { lastSignature = signature; stableSince = Date.now(); }
-        const changedOrEmpty = signature !== before || /displaying\s+0\s*-/i.test(liveDialog.textContent) || /no (?:rows|records|results)/i.test(liveDialog.textContent);
-        const settledUnchanged = !busy && (sawMutation || sawBusy) && Date.now() - startedAt >= Math.max(750, stableMs);
-        if (!busy && changedOrEmpty && !stableSince) stableSince = Date.now();
-        if (!busy && !changedOrEmpty && settledUnchanged && !stableSince) stableSince = Date.now();
-        if (!busy && (changedOrEmpty || settledUnchanged) && stableSince && Date.now() - stableSince >= stableMs) finish({ status: 'complete', rows: extractRows(liveDialog), diagnostic: '' });
+      const onAbort=()=>finish({status:'incomplete',rows:[],diagnostic:'Search cancelled'});
+      const check=()=>{
+        if(finished)return;
+        try {
+          if(options.signal?.aborted)return onAbort();
+          if(options.isCurrent && !options.isCurrent())return finish({status:'incomplete',rows:[],diagnostic:'Source record changed'});
+          const live=findDialog();
+          if(live!==dialog)return finish({status:'incomplete',rows:[],diagnostic:'Manual Match screen closed or changed during search'});
+          const nextRoot=resultObservationRoot(live);
+          if(nextRoot!==observedRoot){
+            observer?.disconnect();observedRoot=nextRoot;dirty=true;sawMutation=true;stableSince=0;
+            if(observer && observedRoot)observer.observe(observedRoot.parentElement || observedRoot,observationOptions);
+          }
+          if(!nextRoot){stableSince=0;return;}
+          const signature=dirty?tableSignature(live):lastSignature;dirty=false;
+          const busy=search.disabled || !!live.querySelector('[aria-busy="true"],.MuiCircularProgress-root,[role="progressbar"]');
+          const now=Date.now();
+          if(signature!==lastSignature){lastSignature=signature;stableSince=now;}
+          if(busy){sawBusy=true;stableSince=0;return;}
+          if(!(sawMutation || sawBusy || signature!==before))return;
+          if(!stableSince)stableSince=now;
+          if(now-stableSince>=stableMs)finish({status:'complete',rows:extractRows(live),diagnostic:''});
+        } catch(error){finish({status:'incomplete',rows:[],diagnostic:'Search could not finish: '+String(error?.message || 'The page changed').split(/[\r\n]/)[0].slice(0,180)});}
       };
-      const observationRoot=resultObservationRoot(dialog);
-      const observer = typeof MutationObserver === 'undefined' || !observationRoot ? null : new MutationObserver(records => { if (isResultActivity(records,observationRoot)) sawMutation = true; check(); });
-      observer?.observe(observationRoot, { childList: true, subtree: true, characterData: true, attributes: true });
-      const timer = setInterval(check, 250);
-      const deadline = setTimeout(() => finish({ status: 'incomplete', rows: [], diagnostic: `Result screen did not stabilize within ${Math.round(timeoutMs / 1000)} seconds` }), timeoutMs);
-      options.signal?.addEventListener('abort', () => finish({ status: 'incomplete', rows: [], diagnostic: 'Search cancelled' }), { once: true });
+      try {
+        before=lastSignature=tableSignature(dialog);
+        if(typeof MutationObserver!=='undefined' && observedRoot){
+          observer=new MutationObserver(records=>{
+            if(!isResultActivity(records,observedRoot))return;
+            dirty=true;sawMutation=true;stableSince=0;
+            if(pending==null)pending=setTimeout(()=>{pending=null;check();},40);
+          });
+          observer.observe(observedRoot.parentElement || observedRoot,observationOptions);
+        }
+        timer=setInterval(()=>{if(!observer)dirty=true;check();},150);
+        deadline=setTimeout(()=>finish({status:'incomplete',rows:[],diagnostic:`Result screen did not stabilize within ${Math.round(timeoutMs/1000)} seconds`}),timeoutMs);
+        options.signal?.addEventListener('abort',onAbort,{once:true});
+        search.click();check();
+      } catch(error){finish({status:'incomplete',rows:[],diagnostic:'Search could not start: '+String(error?.message || 'The page changed').split(/[\r\n]/)[0].slice(0,180)});}
     });
   }
 
   function captureFields(profile = 'storeView') {
     const dialog = findDialog();
     if (!dialog) return null;
-    const source = Gsrs?.extractFromDocument(document, profile);
+    const source = Gsrs?.extractFromDocument(document, profile,{includeCandidates:false});
     const identity = source?.source ? Gsrs.sourceSignature(source) : null;
     const fields = captureSearchFields(dialog,profile);
     return { dialog, fields, identity, profile };
   }
   function restoreFields(snapshot) {
-    if (!snapshot || findDialog() !== snapshot.dialog) return;
-    if (snapshot.identity) {
-      const current = Gsrs?.extractFromDocument(document, snapshot.profile);
-      if (!current?.source || Gsrs.sourceSignature(current) !== snapshot.identity) return;
+    if(!snapshot || findDialog()!==snapshot.dialog)return {ok:true,skipped:true};
+    try {
+      if(snapshot.identity){
+        const current=Gsrs?.extractFromDocument(document,snapshot.profile,{includeCandidates:false});
+        if(!current?.source || Gsrs.sourceSignature(current)!==snapshot.identity)return {ok:true,skipped:true};
+      }
+    }catch{return {ok:false,diagnostic:'The record changed while restoring search fields. Review the form before retrying.'};}
+    let failed=false;
+    for(const {checkbox,checked} of snapshot.fields){
+      try{if(checkbox?.isConnected && checkbox.checked!==checked)checkbox.click();}catch{failed=true;}
     }
-    snapshot.fields.forEach(({ checkbox, checked }) => {
-      if (checkbox?.isConnected && checkbox.checked !== checked) checkbox.click();
-    });
-    snapshot.fields.forEach(({ input, value }) => {
-      if (input?.isConnected && input.value !== value) setInputValue(input, value);
-    });
+    // Restore every value even if one checkbox or input is no longer usable.
+    for(const {input,value} of snapshot.fields){
+      try{if(input?.isConnected && input.value!==value)setInputValue(input,value);}catch{failed=true;}
+    }
+    return failed?{ok:false,diagnostic:'Some previous search fields could not be restored. Review the form before retrying.'}:{ok:true};
   }
-  async function execute(query, options = {}) {
-    if (options.signal?.aborted) return { status: 'incomplete', rows: [], diagnostic: 'Search cancelled' };
-    const snapshot = captureFields(options.profile);
-    try { return await executeSearch(query, options); }
-    finally { restoreFields(snapshot); }
+  async function execute(query,options={}) {
+    if(options.signal?.aborted)return {status:'incomplete',rows:[],diagnostic:'Search cancelled'};
+    let snapshot,result;
+    try {snapshot=captureFields(options.profile);result=await executeSearch(query,options);}
+    catch(error){result={status:'incomplete',rows:[],diagnostic:'Search could not finish: '+String(error?.message || 'The page changed').split(/[\r\n]/)[0].slice(0,180)};}
+    finally {
+      try {const restored=restoreFields(snapshot);if(restored?.ok===false)result={...result,status:'incomplete',diagnostic:restored.diagnostic};}
+      catch {result={...result,status:'incomplete',diagnostic:'Search stopped because the previous field values could not be restored. Review the form before retrying.'};}
+    }
+    return result;
   }
 
   return { FIELD_CONTROLS, PROFILE_CONTROLS, controlsForQuery, rowFromCells, findDialog, controlMatchesField, discoverControl, prepareQuery, captureSearchFields, clearSearchFilters, findSearchButton, extractRows, resultObservationRoot, isResultActivity, submitAndWait, setInputValue, captureFields, restoreFields, execute };

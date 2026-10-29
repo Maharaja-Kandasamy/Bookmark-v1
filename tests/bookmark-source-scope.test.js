@@ -24,3 +24,10 @@ test('multiple selected client rows stop extraction instead of choosing one',()=
  const source={headers:['RS_ID','RS_STORE_NAME'],rows:[['ONE','Client one'],['TWO','Client two']],selectedIndexes:[0,1]};
  assert.equal(A.extractFromDocument({querySelectorAll:()=>[source]},'retailSync').error,'multiple-highlighted-rows');
 });
+
+
+test('source-only refresh never queries or parses the results table',()=>{
+ const source={headers:['RS_ID','RS_STORE_NAME'],rows:[['SRC','Client']],selectedIndexes:[0]};
+ const root={querySelectorAll:selector=>{assert.ok(!selector.includes('manual-match-search-table'));return [source];}};
+ const found=A.extractFromDocument(root,'retailSync',{includeCandidates:false});assert.equal(found.source.slId,'SRC');assert.deepEqual(found.candidates,[]);
+});

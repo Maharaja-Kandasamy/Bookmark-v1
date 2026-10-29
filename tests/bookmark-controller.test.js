@@ -191,3 +191,41 @@ test('pause during final Links review holds completion until Continue and Stop r
   assert.equal((await running).status,stop?'cancelled':'completed');
  }
 });
+
+
+test('a failed run is reported in the panel and does not block a subsequent retry',async()=>{
+ let fail=true;
+ const {controller,store}=setup({PickerManualMatchAdapter:{execute:async()=>{if(fail)throw Error('Temporary page error');return {status:'complete',rows:[]};}}});
+ const failed=await controller.run();assert.equal(failed.status,'incomplete');assert.match(store.get().diagnostic,/Temporary page error/);
+ fail=false;assert.equal((await controller.run()).status,'completed');
+});
+
+test('source-reader errors stay local and recover on a later refresh',()=>{
+ let fail=true;
+ const {controller,store}=setup({PickerGsrsTableAdapter:{extractFromDocument:()=>{if(fail)throw Error('DOM replaced');return {profile:'storeView',source:{slId:'NEW',bannerName:'Acme'},candidates:[]};}}});
+ assert.equal(controller.scan().error,'source-read-failed');assert.match(store.get().diagnostic,/could not be read/);
+ fail=false;controller.refresh();assert.equal(store.get().source.slId,'NEW');
+});
+
+test('a busy or closed bookmark returns a status without an unhandled rejection',async()=>{
+ let finish;
+ const {controller}=setup({PickerRunController:{createRunController:()=>({start:()=>new Promise(resolve=>{finish=resolve;}),isActive:()=>true,cancel(){}})}});
+ const first=controller.run();assert.equal((await controller.run()).status,'busy');finish({status:'completed',observations:[]});await first;
+ controller.destroy();assert.equal((await controller.run()).status,'cancelled');
+});
+
+test('background refresh requests source-only data rather than rescanning results',()=>{
+ const requests=[];const source={slId:'SRC',bannerName:'Acme'};
+ const {controller}=setup({PickerGsrsTableAdapter:{extractFromDocument:(_doc,_profile,options)=>{requests.push(options);return {profile:'storeView',source,candidates:[]};}}});
+ controller.scan();controller.refresh();assert.equal(requests.at(-1).includeCandidates,false);
+});
+
+test('an unexpected final TD error retains ranked results and permits retry',async()=>{
+ const {controller,store}=setup({PickerDuplicateEngine:{normalizeZip:require('../vendor/duplicate-engine').normalizeZip,createSearchPlan:()=>[{id:'one'}],consolidateCandidates:()=>[{candidate:{slId:'0067788'}}],getTopTdIds:()=>['0067788']},PickerBookmarkLinks:{execute:async()=>{throw Error('TD screen changed');}}});
+ const result=await controller.run();assert.equal(result.status,'incomplete');assert.equal(store.get().results[0].candidate.slId,'0067788');assert.match(store.get().diagnostic,/TD screen changed/);
+});
+
+test('normalization errors are shown locally instead of escaping a background scan',()=>{
+ const {controller,store}=setup({PickerDuplicateEngine:{normalizeSource(){throw Error('Invalid source');}}});
+ assert.equal(controller.scan().error,'source-read-failed');assert.match(store.get().diagnostic,/could not be prepared/);
+});

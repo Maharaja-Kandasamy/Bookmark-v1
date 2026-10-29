@@ -292,10 +292,14 @@
   if (root) root.PickerRunController = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
-  const timeout = async (promise, ms, onTimeout) => {
-    let timer;
-    try { return await Promise.race([promise, new Promise(resolve => { timer = setTimeout(() => { onTimeout?.(); resolve({status:'incomplete',rows:[],diagnostic:`Timed out after ${Math.round(ms / 1000)} seconds`}); }, ms); })]); }
-    finally { clearTimeout(timer); }
+  const timeout = async (promise,ms,onTimeout,signal) => {
+    let timer,onAbort,timedOut=false;
+    try { return await Promise.race([promise,new Promise(resolve => {
+      onAbort=()=>{if(!timedOut)resolve({status:'incomplete',rows:[],diagnostic:'Search cancelled'});};
+      signal?.addEventListener('abort',onAbort,{once:true});
+      if(signal?.aborted)onAbort();
+      timer=setTimeout(()=>{timedOut=true;onTimeout?.();resolve({status:'incomplete',rows:[],diagnostic:`Timed out after ${Math.round(ms/1000)} seconds`});},ms);
+    })]); } finally {clearTimeout(timer);signal?.removeEventListener('abort',onAbort);}
   };
 
   function createRunController(options) {
@@ -316,7 +320,7 @@
     const awaitResume = () => paused ? new Promise(resolve => { resumeResolve = resolve; }) : Promise.resolve();
 
     async function start(plan) {
-      if (active) throw new Error('A duplicate check is already active');
+      if (active) return {status:'busy',observations:[],diagnostic:'A search is already running'};
       active = true; paused = false; cancelled = false;
       const startedAt = Date.now();
       pausedMs = 0; pauseStarted = 0;
@@ -333,7 +337,7 @@
           const remainingMs = Math.max(1, runTimeoutMs - elapsed());
           const aborter = new AbortController();
           currentAborter = aborter;
-          const result = await timeout(Promise.resolve().then(() => adapter(query, { signal: aborter.signal })), Math.min(queryTimeoutMs, remainingMs), () => aborter.abort());
+          const result = await timeout(Promise.resolve().then(() => adapter(query, { signal: aborter.signal })).catch(error => ({status:'incomplete',rows:[],diagnostic:'Search could not finish: '+String(error?.message || 'Unexpected failure').split(/[\r\n]/)[0].slice(0,180)})), Math.min(queryTimeoutMs, remainingMs), () => aborter.abort(),aborter.signal);
           currentAborter = null;
           observations.push({ queryId: query.id, query, ...result });
           publish({ status: 'running', progress: index + 1, total: plan.length, observations, progressText: `Search ${index + 1} of ${plan.length}` });
@@ -342,7 +346,8 @@
         await awaitResume();
         const incomplete = observations.some(item => item.status !== 'complete') || observations.length < plan.length;
         const status = cancelled ? 'cancelled' : incomplete ? 'incomplete' : 'completed';
-        const result = { status, observations, progress: observations.length, total: plan.length };
+        const diagnostic = cancelled ? 'Search stopped.' : incomplete ? (observations.find(item => item.status !== 'complete')?.diagnostic || 'Not all checks finished. Retry the incomplete searches.') : '';
+        const result = { status, observations, progress: observations.length, total: plan.length, diagnostic };
         publish(result);
         return result;
       } finally {
@@ -506,33 +511,35 @@
     const area=String(row.areaCode||'').replace(/\D/g,'');const phone=String(row.phone||'').replace(/\D/g,'');
     if(area||phone)row.phone=phone.startsWith(area)&&area?phone:`${area}${phone}`;delete row.areaCode;
     const allAliases=new Set(Object.values(normalizedProfiles[profile]||{}).flat());const useful=new Set(names.map((name,index)=>allAliases.has(name)?index:-1).filter(index=>index>=0));row.copyFields=headers.map((header,index)=>({header:clean(header),value:clean(cells[index]),index})).filter(x=>useful.has(x.index)&&x.header&&x.value).map(({header,value})=>({header,value}));return row;}
-  function modelFromTable(table){
+  function modelFromTable(table,sourceOnly=false,selectedSource=false){
     if(Array.isArray(table?.headers)&&Array.isArray(table?.rows))return table;
     const headers=[...table.querySelectorAll('thead th')].map(cell=>clean(cell.getAttribute('title')||cell.querySelector('[title]')?.getAttribute('title')||cell.textContent));
     const elements=[...table.querySelectorAll('tbody tr')].filter(row=>row.querySelector('td'));
-    const rows=elements.map(row=>[...row.querySelectorAll('td')].map(cell=>clean(cell.textContent)));
-    const selectedIndexes=elements.map((row,index)=>row.matches('.Mui-selected,.selected,.highlighted,[aria-selected="true"],[data-selected="true"]')?index:-1).filter(index=>index>=0);
-    return{headers,rows,selectedIndexes};
+    let selectedIndexes=elements.map((row,index)=>row.matches('.Mui-selected,.selected,.highlighted,[aria-selected="true"],[data-selected="true"]')?index:-1).filter(index=>index>=0);
+    const chosen=(selectedSource||sourceOnly)&&selectedIndexes.length===1?[elements[selectedIndexes[0]]]:sourceOnly?elements.slice(0,1):elements;
+    if((selectedSource||sourceOnly)&&selectedIndexes.length===1)selectedIndexes=[0];
+    const rows=chosen.map(row=>[...row.querySelectorAll('td')].map(cell=>clean(cell.textContent)));
+    return{headers,rows,selectedIndexes,sourceRowCount:elements.length};
   }
-  function modelFromConfiguredXpaths(root){const doc=root?.ownerDocument||root;if(!doc?.evaluate)return null;const XR=doc.defaultView?.XPathResult||globalThis.XPathResult;if(!XR)return null;const first=xpath=>doc.evaluate(xpath,doc,null,XR.FIRST_ORDERED_NODE_TYPE,null).singleNodeValue;const table=first(TABLE_XPATH);const header=first(HEADER_XPATH);const client=first(CLIENT_ROW_XPATH);if(!table||!header||!client||table.closest?.('[data-testid="manual-match-search-table"]'))return null;const headers=[...header.querySelectorAll('th')].map(cell=>clean(cell.getAttribute('title')||cell.querySelector('[title]')?.getAttribute('title')||cell.textContent));const rowCells=row=>[...row.querySelectorAll('td')].map(cell=>clean(cell.textContent));const result=doc.evaluate(CANDIDATE_ROWS_XPATH,doc,null,XR.ORDERED_NODE_SNAPSHOT_TYPE,null);const candidates=[];for(let i=0;i<result.snapshotLength;i++)candidates.push(rowCells(result.snapshotItem(i)));return{headers,rows:[rowCells(client),...candidates]};}
+  function modelFromConfiguredXpaths(root,sourceOnly=false){const doc=root?.ownerDocument||root;if(!doc?.evaluate)return null;const XR=doc.defaultView?.XPathResult||globalThis.XPathResult;if(!XR)return null;const first=xpath=>doc.evaluate(xpath,doc,null,XR.FIRST_ORDERED_NODE_TYPE,null).singleNodeValue;const table=first(TABLE_XPATH);const header=first(HEADER_XPATH);const client=first(CLIENT_ROW_XPATH);if(!table||!header||!client||table.closest?.('[data-testid="manual-match-search-table"]'))return null;const headers=[...header.querySelectorAll('th')].map(cell=>clean(cell.getAttribute('title')||cell.querySelector('[title]')?.getAttribute('title')||cell.textContent));const rowCells=row=>[...row.querySelectorAll('td')].map(cell=>clean(cell.textContent));const result=sourceOnly?{snapshotLength:0}:doc.evaluate(CANDIDATE_ROWS_XPATH,doc,null,XR.ORDERED_NODE_SNAPSHOT_TYPE,null);const candidates=[];for(let i=0;i<result.snapshotLength;i++)candidates.push(rowCells(result.snapshotItem(i)));return{headers,rows:[rowCells(client),...candidates]};}
   function extractSourceAndCandidates(table,requestedProfile){const model=modelFromTable(table);if(!model.headers.length)return{error:'source-headers-not-found'};const detected=detectProfile(model.headers);const effective=requestedProfile==='custom'?'storeView':requestedProfile||detected;if(detected==='unknown'||detected==='ambiguous')return{error:`profile-${detected}`};if(effective!==detected)return{error:'profile-mismatch',detectedProfile:detected,requestedProfile};if(!model.rows.length)return{error:'source-row-not-found'};const rows=model.rows.map(cells=>extractRow(model.headers,cells,detected));return{profile:detected,headers:model.headers,source:rows[0],candidates:rows.slice(1),sourceRowCount:model.rows.length,initialCandidateCount:Math.max(0,model.rows.length-1)};}
-  function extractFromDocument(root,requestedProfile){
+  function extractFromDocument(root,requestedProfile,options={}){
     const scoped=findScopedTable(root,'source');
     if(scoped.table){
-      const model=modelFromTable(scoped.table);
+      const model=modelFromTable(scoped.table,options.includeCandidates===false,true);
       if(model.selectedIndexes?.length>1)return{error:'multiple-highlighted-rows'};
       if(model.selectedIndexes?.length===1){
         const source=extractSourceAndCandidates({headers:model.headers,rows:[model.rows[model.selectedIndexes[0]]]},requestedProfile);
         if(source.error)return source;
-        const results=findScopedTable(root,'results');
+        const results=options.includeCandidates===false?{}:findScopedTable(root,'results');
         const candidates=[];
         if(results.table){const resultModel=modelFromTable(results.table),profile=detectProfile(resultModel.headers);if(normalizedProfiles[profile])for(const cells of resultModel.rows)candidates.push(extractRow(resultModel.headers,cells,profile));}
-        return{...source,candidates,sourceRowCount:model.rows.length,initialCandidateCount:candidates.length};
+        return{...source,candidates,sourceRowCount:model.sourceRowCount??model.rows.length,initialCandidateCount:candidates.length};
       }
-      return extractSourceAndCandidates(scoped.table,requestedProfile);
+      return extractSourceAndCandidates(model,requestedProfile);
     }
     if(scoped.error==='multiple-source-tables')return scoped;
-    const configured=modelFromConfiguredXpaths(root);
+    const configured=modelFromConfiguredXpaths(root,options.includeCandidates===false);
     if(configured)return extractSourceAndCandidates(configured,requestedProfile);
     return scoped;
   }
@@ -693,8 +700,8 @@
     const table = byTestId(dialog, 'manual-match-search-table');
     return table ? `${table.querySelectorAll('tbody tr').length}|${table.textContent.replace(/\s+/g, ' ').trim()}` : 'missing';
   };
-  const resultObservationRoot = dialog => byTestId(dialog, 'manual-match-search-table')?.parentElement || byTestId(dialog, 'manual-match-search-table');
-  const isResultActivity = (records, resultRoot) => !!resultRoot && (records || []).some(record => resultRoot.contains?.(record.target));
+  const resultObservationRoot = dialog => byTestId(dialog, 'manual-match-search-table');
+  const isResultActivity = (records,resultRoot) => !!resultRoot && (records || []).some(record => resultRoot.contains?.(record.target) || [...(record.addedNodes || []),...(record.removedNodes || [])].some(node => node===resultRoot || node.matches?.('[data-testid="manual-match-search-table"]') || node.querySelector?.('[data-testid="manual-match-search-table"]')));
 
   function extractRows(dialog = findDialog()) {
     const table = byTestId(dialog, 'manual-match-search-table');
@@ -721,73 +728,96 @@
     return submitAndWait(dialog, search, options);
   }
 
-  function submitAndWait(dialog, search, options = {}) {
-    const timeoutMs = options.timeoutMs || 30000;
-    const stableMs = options.stableMs || 1500;
-    if (options.signal?.aborted) return Promise.resolve({status:'incomplete',rows:[],diagnostic:'Search cancelled'});
-    const before = tableSignature(dialog);
-    const startedAt = Date.now();
-    search.click();
+  function submitAndWait(dialog,search,options={}) {
+    const timeoutMs=options.timeoutMs || 30000,stableMs=options.stableMs || 600;
+    if(options.signal?.aborted)return Promise.resolve({status:'incomplete',rows:[],diagnostic:'Search cancelled'});
     return new Promise(resolve => {
-      let finished = false;
-      let lastSignature = before;
-      let stableSince = 0;
-      let sawMutation = false;
-      let sawBusy = false;
-      const finish = result => {
-        if (finished) return;
-        finished = true; clearInterval(timer); clearTimeout(deadline);
-        observer?.disconnect(); resolve(result);
+      let finished=false,timer,deadline,pending,observer,before,lastSignature,stableSince=0,sawMutation=false,sawBusy=false,dirty=true;
+      let observedRoot=resultObservationRoot(dialog);
+      const observationOptions={childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['aria-busy']};
+      const finish=result=>{
+        if(finished)return;finished=true;
+        clearInterval(timer);clearTimeout(deadline);clearTimeout(pending);observer?.disconnect();
+        options.signal?.removeEventListener('abort',onAbort);resolve(result);
       };
-      const check = () => {
-        const liveDialog = findDialog();
-        if (options.isCurrent && !options.isCurrent()) return finish({ status: 'incomplete', rows: [], diagnostic: 'Source record changed' });
-        if (!liveDialog) return finish({ status: 'incomplete', rows: [], diagnostic: 'Manual Match dialog closed during search' });
-        const signature = tableSignature(liveDialog);
-        const busy = !!liveDialog.querySelector('[aria-busy="true"], .MuiCircularProgress-root, [role="progressbar"]') || search.disabled;
-        if (busy) sawBusy = true;
-        if (signature !== lastSignature) { lastSignature = signature; stableSince = Date.now(); }
-        const changedOrEmpty = signature !== before || /displaying\s+0\s*-/i.test(liveDialog.textContent) || /no (?:rows|records|results)/i.test(liveDialog.textContent);
-        const settledUnchanged = !busy && (sawMutation || sawBusy) && Date.now() - startedAt >= Math.max(750, stableMs);
-        if (!busy && changedOrEmpty && !stableSince) stableSince = Date.now();
-        if (!busy && !changedOrEmpty && settledUnchanged && !stableSince) stableSince = Date.now();
-        if (!busy && (changedOrEmpty || settledUnchanged) && stableSince && Date.now() - stableSince >= stableMs) finish({ status: 'complete', rows: extractRows(liveDialog), diagnostic: '' });
+      const onAbort=()=>finish({status:'incomplete',rows:[],diagnostic:'Search cancelled'});
+      const check=()=>{
+        if(finished)return;
+        try {
+          if(options.signal?.aborted)return onAbort();
+          if(options.isCurrent && !options.isCurrent())return finish({status:'incomplete',rows:[],diagnostic:'Source record changed'});
+          const live=findDialog();
+          if(live!==dialog)return finish({status:'incomplete',rows:[],diagnostic:'Manual Match screen closed or changed during search'});
+          const nextRoot=resultObservationRoot(live);
+          if(nextRoot!==observedRoot){
+            observer?.disconnect();observedRoot=nextRoot;dirty=true;sawMutation=true;stableSince=0;
+            if(observer && observedRoot)observer.observe(observedRoot.parentElement || observedRoot,observationOptions);
+          }
+          if(!nextRoot){stableSince=0;return;}
+          const signature=dirty?tableSignature(live):lastSignature;dirty=false;
+          const busy=search.disabled || !!live.querySelector('[aria-busy="true"],.MuiCircularProgress-root,[role="progressbar"]');
+          const now=Date.now();
+          if(signature!==lastSignature){lastSignature=signature;stableSince=now;}
+          if(busy){sawBusy=true;stableSince=0;return;}
+          if(!(sawMutation || sawBusy || signature!==before))return;
+          if(!stableSince)stableSince=now;
+          if(now-stableSince>=stableMs)finish({status:'complete',rows:extractRows(live),diagnostic:''});
+        } catch(error){finish({status:'incomplete',rows:[],diagnostic:'Search could not finish: '+String(error?.message || 'The page changed').split(/[\r\n]/)[0].slice(0,180)});}
       };
-      const observationRoot=resultObservationRoot(dialog);
-      const observer = typeof MutationObserver === 'undefined' || !observationRoot ? null : new MutationObserver(records => { if (isResultActivity(records,observationRoot)) sawMutation = true; check(); });
-      observer?.observe(observationRoot, { childList: true, subtree: true, characterData: true, attributes: true });
-      const timer = setInterval(check, 250);
-      const deadline = setTimeout(() => finish({ status: 'incomplete', rows: [], diagnostic: `Result screen did not stabilize within ${Math.round(timeoutMs / 1000)} seconds` }), timeoutMs);
-      options.signal?.addEventListener('abort', () => finish({ status: 'incomplete', rows: [], diagnostic: 'Search cancelled' }), { once: true });
+      try {
+        before=lastSignature=tableSignature(dialog);
+        if(typeof MutationObserver!=='undefined' && observedRoot){
+          observer=new MutationObserver(records=>{
+            if(!isResultActivity(records,observedRoot))return;
+            dirty=true;sawMutation=true;stableSince=0;
+            if(pending==null)pending=setTimeout(()=>{pending=null;check();},40);
+          });
+          observer.observe(observedRoot.parentElement || observedRoot,observationOptions);
+        }
+        timer=setInterval(()=>{if(!observer)dirty=true;check();},150);
+        deadline=setTimeout(()=>finish({status:'incomplete',rows:[],diagnostic:`Result screen did not stabilize within ${Math.round(timeoutMs/1000)} seconds`}),timeoutMs);
+        options.signal?.addEventListener('abort',onAbort,{once:true});
+        search.click();check();
+      } catch(error){finish({status:'incomplete',rows:[],diagnostic:'Search could not start: '+String(error?.message || 'The page changed').split(/[\r\n]/)[0].slice(0,180)});}
     });
   }
 
   function captureFields(profile = 'storeView') {
     const dialog = findDialog();
     if (!dialog) return null;
-    const source = Gsrs?.extractFromDocument(document, profile);
+    const source = Gsrs?.extractFromDocument(document, profile,{includeCandidates:false});
     const identity = source?.source ? Gsrs.sourceSignature(source) : null;
     const fields = captureSearchFields(dialog,profile);
     return { dialog, fields, identity, profile };
   }
   function restoreFields(snapshot) {
-    if (!snapshot || findDialog() !== snapshot.dialog) return;
-    if (snapshot.identity) {
-      const current = Gsrs?.extractFromDocument(document, snapshot.profile);
-      if (!current?.source || Gsrs.sourceSignature(current) !== snapshot.identity) return;
+    if(!snapshot || findDialog()!==snapshot.dialog)return {ok:true,skipped:true};
+    try {
+      if(snapshot.identity){
+        const current=Gsrs?.extractFromDocument(document,snapshot.profile,{includeCandidates:false});
+        if(!current?.source || Gsrs.sourceSignature(current)!==snapshot.identity)return {ok:true,skipped:true};
+      }
+    }catch{return {ok:false,diagnostic:'The record changed while restoring search fields. Review the form before retrying.'};}
+    let failed=false;
+    for(const {checkbox,checked} of snapshot.fields){
+      try{if(checkbox?.isConnected && checkbox.checked!==checked)checkbox.click();}catch{failed=true;}
     }
-    snapshot.fields.forEach(({ checkbox, checked }) => {
-      if (checkbox?.isConnected && checkbox.checked !== checked) checkbox.click();
-    });
-    snapshot.fields.forEach(({ input, value }) => {
-      if (input?.isConnected && input.value !== value) setInputValue(input, value);
-    });
+    // Restore every value even if one checkbox or input is no longer usable.
+    for(const {input,value} of snapshot.fields){
+      try{if(input?.isConnected && input.value!==value)setInputValue(input,value);}catch{failed=true;}
+    }
+    return failed?{ok:false,diagnostic:'Some previous search fields could not be restored. Review the form before retrying.'}:{ok:true};
   }
-  async function execute(query, options = {}) {
-    if (options.signal?.aborted) return { status: 'incomplete', rows: [], diagnostic: 'Search cancelled' };
-    const snapshot = captureFields(options.profile);
-    try { return await executeSearch(query, options); }
-    finally { restoreFields(snapshot); }
+  async function execute(query,options={}) {
+    if(options.signal?.aborted)return {status:'incomplete',rows:[],diagnostic:'Search cancelled'};
+    let snapshot,result;
+    try {snapshot=captureFields(options.profile);result=await executeSearch(query,options);}
+    catch(error){result={status:'incomplete',rows:[],diagnostic:'Search could not finish: '+String(error?.message || 'The page changed').split(/[\r\n]/)[0].slice(0,180)};}
+    finally {
+      try {const restored=restoreFields(snapshot);if(restored?.ok===false)result={...result,status:'incomplete',diagnostic:restored.diagnostic};}
+      catch {result={...result,status:'incomplete',diagnostic:'Search stopped because the previous field values could not be restored. Review the form before retrying.'};}
+    }
+    return result;
   }
 
   return { FIELD_CONTROLS, PROFILE_CONTROLS, controlsForQuery, rowFromCells, findDialog, controlMatchesField, discoverControl, prepareQuery, captureSearchFields, clearSearchFilters, findSearchButton, extractRows, resultObservationRoot, isResultActivity, submitAndWait, setInputValue, captureFields, restoreFields, execute };
@@ -816,22 +846,26 @@
   return {buildFullAddress,computePanelPlacement};
 });
 (function (root) {
-  function create(initialState = {}) {
+  function create(initialState = {},options = {}) {
     let state = { ...initialState };
     let destroyed = false;
     const listeners = new Set();
+    const reportError=error=>{try{options.onError?.(error);}catch{}};
+    const notify=listener=>{try{listener(state)?.catch?.(reportError);}catch(error){reportError(error);}};
     const api = {
       get() { return destroyed ? null : state; },
       set(patch) {
         if (destroyed) return null;
-        state = { ...state, ...(typeof patch === 'function' ? patch(state) : patch) };
-        listeners.forEach(listener => listener(state));
+        const update=typeof patch === 'function'?patch(state):patch;
+        if(!update || Object.keys(update).every(key=>Object.is(state[key],update[key])))return state;
+        state={...state,...update};
+        listeners.forEach(notify);
         return state;
       },
       subscribe(listener) {
         if (destroyed) return () => {};
         listeners.add(listener);
-        listener(state);
+        notify(listener);
         return () => listeners.delete(listener);
       },
       destroy() { destroyed = true; state = null; listeners.clear(); }
@@ -841,8 +875,11 @@
   root.PickerBookmarkStore = { create };
 })(typeof globalThis !== 'undefined' ? globalThis : this);
 (function (root) {
-  function create() {
+  function create(options = {}) {
     const disposers = [];
+    let reporting=false;
+    const reportError=error=>{if(reporting)return;reporting=true;try{options.onError?.(error);}catch{}finally{reporting=false;}};
+    const guard=fn=>(...args)=>{try{const result=fn(...args);result?.catch?.(reportError);return result;}catch(error){reportError(error);}};
     let disposed = false;
     const add = disposer => {
       if (typeof disposer !== 'function') return disposer;
@@ -852,18 +889,20 @@
     const api = {
       get disposed() { return disposed; },
       add,
+      reportError,
       listen(target, type, handler, options) {
-        target.addEventListener(type, handler, options);
-        add(() => target.removeEventListener(type, handler, options));
+        const listener=guard(handler);
+        target.addEventListener(type, listener, options);
+        add(() => target.removeEventListener(type, listener, options));
         return handler;
       },
       timeout(fn, ms) {
-        const id = setTimeout(fn, ms);
+        const id = setTimeout(guard(fn), ms);
         add(() => clearTimeout(id));
         return id;
       },
       frame(fn) {
-        const id = requestAnimationFrame(fn);
+        const id = requestAnimationFrame(guard(fn));
         add(() => cancelAnimationFrame(id));
         return id;
       },
@@ -940,7 +979,10 @@
     } catch (error) {
       return {status:'incomplete',diagnostic:`Ranked TD search failed: ${error.message}`,value};
     } finally {
-      if (!options.isCurrent || options.isCurrent()) Adapter.restoreFields(snapshot);
+      if (!options.isCurrent || options.isCurrent()) {
+        const restored=Adapter.restoreFields(snapshot);
+        if(restored?.ok===false)return {status:'incomplete',value,diagnostic:restored.diagnostic};
+      }
     }
   }
   root.PickerBookmarkLinks = {findTdField,execute};
@@ -956,6 +998,7 @@
     const Adapter = root.PickerManualMatchAdapter;
     const Runner = root.PickerRunController;
     let runner = null;
+    let runBusy = false;
     let extraction = null;
     let destroyed = false;
     let revision = 0;
@@ -972,47 +1015,59 @@
       runner?.cancel?.();
       runner = null;
     }
+    function readSource(includeCandidates = true) {
+      try {
+        const profile = extraction?.profile || 'storeView';
+        let found = Gsrs.extractFromDocument(doc,profile,{includeCandidates});
+        if (found?.error === 'profile-mismatch') found = Gsrs.extractFromDocument(doc,found.detectedProfile || (profile==='storeView'?'retailSync':'storeView'),{includeCandidates});
+        return found?.error || found?.source ? found : {error:'source-read-failed',diagnostic:'The current record is incomplete. Refresh the Manual screen and retry.'};
+      } catch { return {error:'source-read-failed',diagnostic:'The current record could not be read. Refresh the Manual screen and retry.'}; }
+    }
     function refresh() {
       if (destroyed) return;
-      let found = Gsrs.extractFromDocument(doc, 'storeView');
-      if (found?.error === 'profile-mismatch' || found?.detectedProfile === 'retailSync') found = Gsrs.extractFromDocument(doc, 'retailSync');
-      if (found?.error) {
-        if (extraction || store.get()?.source) scan();
+      const found = readSource(false);
+      if (found.error) {
+        if (extraction || store.get()?.source) scan(found);
       } else if (signature(found) !== signature(extraction)) scan();
     }
-    // Observe only the page DOM: the bot renders in its own shadow root.
+    // Ignore result/filter animation updates; source edits and record selection remain immediate.
     if (win.MutationObserver && doc.documentElement && lifecycle.observe) {
       let pending = null;
-      const observer = new win.MutationObserver(() => {
-        win.clearTimeout(pending);
-        pending = win.setTimeout(refresh, 100);
+      const ignored = '[data-testid="manual-match-search-table"],.horizontalPanelMM,#picker-bookmark-v1-host';
+      const observer = new win.MutationObserver(records => {
+        const relevant = records.some(record => {
+          const element = record.target.nodeType===1?record.target:record.target.parentElement;
+          if (element?.closest?.(ignored)) return false;
+          if (record.type==='attributes' || record.type==='characterData') return !!element?.closest?.('[data-testid="manual-match-table"]');
+          return true;
+        });
+        if (!relevant || pending != null) return;
+        pending = win.setTimeout(() => { pending=null; refresh(); },100);
       });
-      lifecycle.observe(observer, doc.documentElement, { childList: true, subtree: true, characterData: true, attributes: true });
+      lifecycle.observe(observer,doc.documentElement,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['class','aria-selected','data-selected']});
       lifecycle.add(() => win.clearTimeout(pending));
     }
     if (win.setInterval && lifecycle.add) {
-      const timer = win.setInterval(refresh, 750);
+      const timer = win.setInterval(() => {if(!doc.hidden)refresh();},2500);
       lifecycle.add(() => win.clearInterval(timer));
     }
 
-    function scan() {
+    function scan(found = readSource()) {
       if (destroyed) return { error: 'bookmark-destroyed' };
-      let found = Gsrs.extractFromDocument(doc, 'storeView');
-      if (found?.error === 'profile-mismatch' || found?.detectedProfile === 'retailSync') found = Gsrs.extractFromDocument(doc, 'retailSync');
+      let normalized;
+      if(!found?.error){try{normalized=Engine.normalizeSource?Engine.normalizeSource(found.source):{...found.source,zip:Engine.normalizeZip(found.source.zip)};}catch{found={error:'source-read-failed',diagnostic:'The current record could not be prepared. Refresh the Manual screen and retry.'};}}
       invalidate();
       extraction = null;
       if (found?.error) {
-        store.set({ status: 'error', diagnostic: 'You need to be in the Manual screen to activate me.', diagnosticCode: found.error, source: null, results: [], linksSearch: null, tdIds: [], initialCandidates: [], observations: [], plan: [], progress: 0, total: 0, activeQuery: null });
+        store.set({ status: 'error', diagnostic: found.diagnostic || 'You need to be in the Manual screen to activate me.', diagnosticCode: found.error, source: null, results: [], linksSearch: null, tdIds: [], initialCandidates: [], observations: [], plan: [], progress: 0, total: 0, activeQuery: null });
         return found;
       }
       extraction = found;
-      store.set({ status: 'ready', profile: found.profile, source: Engine.normalizeSource ? Engine.normalizeSource(found.source) : { ...found.source, zip: Engine.normalizeZip(found.source.zip) }, initialCandidates: found.candidates || [], sourceRowCount: found.sourceRowCount, initialCandidateCount: found.initialCandidateCount, results: [], linksSearch: null, tdIds: [], observations: [], plan: [], progress: 0, total: 0, activeQuery: null, diagnostic: '', diagnosticCode: '' });
+      store.set({ status: 'ready', profile: found.profile, source: normalized, initialCandidates: found.candidates || [], sourceRowCount: found.sourceRowCount, initialCandidateCount: found.initialCandidateCount, results: [], linksSearch: null, tdIds: [], observations: [], plan: [], progress: 0, total: 0, activeQuery: null, diagnostic: '', diagnosticCode: '' });
       return found;
     }
 
-    async function run(group = 'all') {
-      if (destroyed) throw new Error('Bookmark was closed');
-      if (completionAborter || runner?.isActive?.()) throw new Error('A duplicate check is already active');
+    async function runChecks(group = 'all') {
       scan();
       const runRevision = revision;
       const current = store.get();
@@ -1025,11 +1080,11 @@
         return result;
       }
       runner = Runner.createRunController({
-        adapter: (query, runOptions) => Adapter.execute(query, { ...runOptions, timeoutMs: 30000, stableMs: 1500, profile: current.profile }),
+        adapter: (query, runOptions) => Adapter.execute(query, { ...runOptions, timeoutMs: 30000, stableMs: 600, profile: current.profile, isCurrent:() => { refresh(); return !destroyed && revision === runRevision; } }),
         onState: state => { if (!destroyed && runRevision === revision) store.set(state.status === 'completed' ? {...state,status:'running'} : state); },
         queryTimeoutMs: 30000,
         runTimeoutMs: 180000,
-        safetyDelayMs: 900
+        safetyDelayMs: 150
       });
       const runResult = await runner.start(plan);
       refresh();
@@ -1044,7 +1099,7 @@
         completionAborter = aborter;
         store.set({status:'waiting',results,tdIds,activeQuery:{type:'links',label:`Reviewing links for the top ${tdIds.length} matches...`},progress:plan.length,total:plan.length+1});
         try {
-          linksSearch = await root.PickerBookmarkLinks.execute(tdIds,{profile:current.profile,signal:aborter.signal,timeoutMs:30000,stableMs:1500,beforeSubmit:waitForContinue,
+          linksSearch = await root.PickerBookmarkLinks.execute(tdIds,{profile:current.profile,signal:aborter.signal,timeoutMs:30000,stableMs:600,beforeSubmit:waitForContinue,
             isCurrent:() => { refresh(); return !destroyed && revision === runRevision; }});
           await waitForContinue();
         } finally { if(completionAborter === aborter)completionAborter = null; }
@@ -1059,6 +1114,25 @@
       store.set(result);
       runner = null;
       return result;
+    }
+
+    async function run(group = 'all') {
+      if (destroyed) return {status:'cancelled',observations:[],results:[]};
+      if (runBusy) return {status:'busy',diagnostic:'A search is already running. Use Pause or Stop before starting another.'};
+      runBusy=true;
+      let runRevision=revision;
+      try {
+        const pending=runChecks(group);
+        runRevision=revision;
+        return await pending;
+      } catch (error) {
+        completionAborter?.abort(); runner?.cancel?.();
+        if(destroyed || revision!==runRevision)return {status:'cancelled',observations:[],results:[]};
+        const current=store.get() || {};
+        const message=String(error?.message || 'Unexpected search failure').split(/[\r\n]/)[0].slice(0,180);
+        const result={status:'incomplete',observations:current.observations || [],results:current.results || [],activeQuery:null,diagnostic:`Search stopped safely: ${message}. Retry the search.`};
+        store.set(result); return result;
+      } finally { clearPause(); runner=null; completionAborter=null; runBusy=false; }
     }
 
     function cancel() { clearPause(); runner?.cancel?.(); completionAborter?.abort(); }
@@ -1148,6 +1222,8 @@
     const $ = selector => shadow.querySelector(selector);
     const shell = $('.shell');
     const panel = $('.panel');
+    const EMPTY_SOURCE = {}, EMPTY_RESULTS = [];
+    let renderedSource,renderedResults,renderedEmptyStatus,availablePlan=[],renderFrame=null,pendingState,positioned=false,anchorKey='';
     let open = false;
     let state = store.get() || {};
     let drag = null;
@@ -1177,11 +1253,15 @@
     };
     const position = () => {
       const rect = $('.bot').getBoundingClientRect();
+      const nextAnchorKey=[rect.left,rect.top,rect.width,rect.height,window.innerWidth,window.innerHeight].join('|');
+      if(nextAnchorKey!==anchorKey){
+      anchorKey=nextAnchorKey;
       shell.style.setProperty('--toolbar-offset','0px');
       const toolbarRect = $('.quick-searches').getBoundingClientRect();
       const toolbarOffset = toolbarRect.left < 6 ? 6 - toolbarRect.left : toolbarRect.right > window.innerWidth - 6 ? window.innerWidth - 6 - toolbarRect.right : 0;
       shell.style.setProperty('--toolbar-offset',`${toolbarOffset}px`);
       shell.classList.toggle('status-right', rect.left < 310);
+      }
       if (!open) return;
       const placement = Layout.computePanelPlacement(rect, { width: 430, height: Math.min(680, panel.scrollHeight || 680) }, { width: window.innerWidth, height: window.innerHeight });
       Object.assign(panel.style, { left: `${placement.left}px`, top: `${placement.top}px`, width: `${placement.width}px`, maxHeight: `${placement.maxHeight}px` });
@@ -1191,11 +1271,16 @@
       shell.dataset.state = state.status || 'ready';
       if (!drag && state.status !== previousStatus) animateRobot(state.status === 'completed' ? 'celebrating' : restingMotion(), state.status === 'completed' ? 2400 : 0);
       previousStatus = state.status;
-      const source = state.source || {};
+      const source = state.source || EMPTY_SOURCE;
+      const sourceChanged=source!==renderedSource;
+      if(sourceChanged){
+      renderedSource=source;
+      availablePlan=state.source?Engine.createSearchPlan(state.source):[];
       $('.source-name').textContent = source.bannerName || 'Manual screen required';
       $('.source-meta').textContent = [state.profile === 'retailSync' ? 'Retail' : 'Store', source.storeNumber && `Store #${source.storeNumber}${source.storeNumberInferred ? ' (from banner)' : ''}`, address()].filter(Boolean).join(' · ');
       const fields = $('.fields'); fields.textContent = '';
       [['bannerName','Banner'],['storeNumber','Store #'],['address','Address'],['city','City'],['state','State'],['zip','ZIP'],['phone','Phone']].forEach(([key,label]) => { const button=document.createElement('button'); button.className='field'; button.dataset.copy=key; button.disabled=!source[key]; button.innerHTML=`<span>${label}</span><b></b>`; button.querySelector('b').textContent=source[key]||'Not available'; fields.appendChild(button); });
+      }
       const total = state.total || state.plan?.length || 0; const progress = state.progress || 0;
       const googleQuery = [source.bannerName, source.address, source.city, source.state, source.zip].filter(Boolean).join(' ');
       $('.fill').style.width = total ? `${Math.min(100, progress / total * 100)}%` : '0%';
@@ -1212,18 +1297,35 @@
       $('.google-banner-state').disabled = !source.bannerName || !source.state;
       $('.google-banner-city').disabled = !source.bannerName || !source.city;
       $('.notice').textContent=state.diagnostic || (state.status === 'ready' ? 'Ready.' : state.status === 'completed' ? 'Checks complete.' : state.status === 'paused' ? 'Paused. The current search may finish; Continue resumes the remaining checks.' : 'Checking current record.');
-      const availablePlan = state.source ? Engine.createSearchPlan(state.source) : [];
+
       const queryGroups = {banner:['banner-exact-zip','banner-wildcard-zip'],bannerState:['banner-state'],address:['address-city','address-zip'],phone:['phone'],store:['store-banner']};
       shadow.querySelectorAll('[data-search]').forEach(button => { const group=button.dataset.search; button.disabled=busy || !availablePlan.some(query => group==='all' || queryGroups[group]?.includes(query.type)); });
       const manualRequired = !state.source && !!state.diagnostic;
       $('.notice').dataset.tone = manualRequired ? 'warning' : 'info';
       $('.notice').setAttribute('role', manualRequired ? 'alert' : 'status');
+      const nextResults=state.results || EMPTY_RESULTS;
+      if(sourceChanged || renderedResults!==nextResults || (!nextResults.length && renderedEmptyStatus!==state.status)){
+      renderedResults=nextResults;renderedEmptyStatus=state.status;
       const results=$('.results'); results.textContent='';
       (state.results||[]).forEach((item,index)=>{ const candidate=item.candidate||item; const card=document.createElement('article'); card.className=`result ${item.directMatch?'direct':String(item.classification||'').startsWith('Exact')?'exact':''}`; card.innerHTML=`<div class="result-heading"><h4></h4><span class="record-status"></span></div><p class="kind"></p><p class="where"></p><p class="why"></p><p class="conflicts"></p><div class="result-actions"><button class="btn" data-icon="copy" data-result="td" data-index="${index}">TD Copy</button><button class="btn" data-icon="copy" data-result="full" data-index="${index}">Full Copy</button></div>`; const rawStatus=Engine.cleanText(candidate.storeStatus || candidate.copyFields?.find(field => /^(?:STORE_STATUS|SL_STORE_STATUS|RS_STORE_STATUS|STATUS)$/i.test(field.header))?.value); const pill=card.querySelector('.record-status'); const statusKey=rawStatus.toLowerCase().replace(/[^a-z]/g,''); const knownStatus={open:'Open',closed:'Closed',unverified:'Unverified',unverifyed:'Unverified',duplicate:'Duplicate'}; pill.textContent=knownStatus[statusKey] || rawStatus || 'Status unavailable'; pill.dataset.status=statusKey==='unverifyed'?'unverified':statusKey; pill.title=rawStatus ? `Record status: ${rawStatus}` : 'Record status was not provided'; card.querySelector('h4').textContent=candidate.bannerName||`SL_ID ${candidate.slId||'Unknown'}`; card.querySelector('.kind').textContent=item.classification||'Potential duplicate'; card.querySelector('.where').textContent=[candidate.address,candidate.city,candidate.state,candidate.zip].filter(Boolean).join(', '); const explanation=Engine.explainCandidate(state.source,item); card.querySelector('.why').textContent=explanation.summary; card.querySelector('.conflicts').textContent=explanation.conflicts.join('; '); decorateIcons(card); results.appendChild(card); });
       if (!(state.results||[]).length) { const empty=document.createElement('div');empty.className='empty';empty.textContent=state.status==='completed'?'No duplicates found.':'Run checks to see duplicate results.';results.appendChild(empty); }
-      position();
+      }
+      if(open || !positioned){position();positioned=true;}
     }
-    const unsubscribe = store.subscribe(render); lifecycle.add(unsubscribe);
+    function safeRender(next){
+      try{render(next);}catch(error){
+        renderedSource=undefined;renderedResults=undefined;
+        const notice=$('.notice');if(notice){notice.textContent='The panel could not update. Close and reopen Picker, then retry.';notice.dataset.tone='warning';}
+      }
+    }
+    const unsubscribe=store.subscribe(next=>{
+      pendingState=next;
+      if(!positioned){safeRender(next);return;}
+      if(renderFrame!=null)return;
+      renderFrame=window.requestAnimationFrame(()=>{renderFrame=null;if(!killing)safeRender(pendingState);});
+    });
+    lifecycle.add(unsubscribe);
+    lifecycle.add(()=>window.cancelAnimationFrame?.(renderFrame));
     function openPanel() { if(killing)return; open=true; $('.bot-status').hidden=true; panel.classList.add('open'); window.requestAnimationFrame(position); }
     function closePanel() { open=false; panel.classList.remove('open'); $('.bot-status').hidden=state.status==='ready'; position(); }
     function finishKill() {
@@ -1258,7 +1360,7 @@
       if(target.classList.contains('close')) return closePanel();
       if(target.classList.contains('quick-stop')) { controller.cancel(); return; }
       if(target.dataset.search || target.classList.contains('run') || target.classList.contains('retry')) { closePanel(); return controller.run(target.dataset.search || 'all').catch(error=>{ $('.notice').textContent=error.message; $('.bot').title=error.message; }); }
-      if(target.classList.contains('pause') || target.classList.contains('quick-pause')) return state.status==='paused'?controller.resume():controller.pause();
+      if(target.classList.contains('pause') || target.classList.contains('quick-pause')) return store.get()?.status==='paused'?controller.resume():controller.pause();
       if(target.classList.contains('cancel')) return controller.cancel();
       if(target.classList.contains('kill')) return kill();
       if(target.dataset.copy) return copy(state.source?.[target.dataset.copy]);
@@ -1322,17 +1424,40 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this);
 (function (root) {
   function launch() {
-    const existing = window.__pickerBookmarkV1;
-    if (existing) { existing.kill({ immediate: true }); }
-    const lifecycle = root.PickerBookmarkLifecycle.create();
-    const store = root.PickerBookmarkStore.create({ status:'ready',results:[],observations:[] });
-    const controller = root.PickerBookmarkController.create({ document, window, store, lifecycle });
-    controller.scan();
-    const instance = { open(){ controller.refresh(); bot.open(); }, kill(options){ bot.destroy(options); } };
-    const bot = root.PickerBookmarkBot.mount({ document, window, store, controller, lifecycle, onKilled(){ if (window.__pickerBookmarkV1 === instance) delete window.__pickerBookmarkV1; } });
-    window.__pickerBookmarkV1 = instance;
-    bot.open();
-    return instance;
+    let lifecycle,store,controller,instance;
+    try {
+      document.getElementById?.('picker-bookmark-startup-error')?.remove();
+      const existing = window.__pickerBookmarkV1;
+      if (existing) { existing.kill({ immediate: true }); }
+      lifecycle = root.PickerBookmarkLifecycle.create({onError(error){
+        try{controller?.cancel();}catch{}
+        const message=String(error?.message || 'An action could not finish').split(/[\r\n]/)[0].slice(0,180);
+        store?.set({status:'incomplete',activeQuery:null,diagnostic:`Action stopped safely: ${message}. Retry the action.`});
+      }});
+      store = root.PickerBookmarkStore.create({ status:'ready',results:[],observations:[] },{onError:lifecycle.reportError});
+      controller = root.PickerBookmarkController.create({ document, window, store, lifecycle });
+      controller.scan();
+      let bot;
+      instance = { open(){ controller.refresh(); bot.open(); }, kill(options){ bot.destroy(options); } };
+      bot = root.PickerBookmarkBot.mount({ document, window, store, controller, lifecycle, onKilled(){ if (window.__pickerBookmarkV1 === instance) delete window.__pickerBookmarkV1; } });
+      window.__pickerBookmarkV1 = instance;
+      bot.open();
+      return instance;
+    } catch {
+      try{controller?.destroy();}catch{}
+      try{lifecycle?.dispose();store?.destroy();}catch{}
+      if(window.__pickerBookmarkV1===instance)delete window.__pickerBookmarkV1;
+      try {
+        document.getElementById?.('picker-bookmark-v1-host')?.remove();
+        const notice=document.createElement('div');
+        notice.id='picker-bookmark-startup-error';notice.setAttribute('role','alert');
+        notice.style.cssText='position:fixed;right:18px;bottom:18px;max-width:320px;padding:14px;border:1px solid #f59e0b;border-radius:8px;background:#fffbeb;color:#78350f;z-index:2147483647;font:13px Segoe UI,sans-serif';
+        notice.textContent='Picker could not start. Refresh the Manual screen and launch your bookmark again. ';
+        const dismiss=document.createElement('button');dismiss.textContent='Dismiss';dismiss.onclick=()=>notice.remove();notice.appendChild(dismiss);
+        document.documentElement.appendChild(notice);
+      } catch {}
+      return null;
+    }
   }
   function kill() { window.__pickerBookmarkV1?.kill(); }
   root.PickerBookmarkV1 = { launch, kill };

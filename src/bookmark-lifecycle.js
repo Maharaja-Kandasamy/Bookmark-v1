@@ -1,6 +1,9 @@
 (function (root) {
-  function create() {
+  function create(options = {}) {
     const disposers = [];
+    let reporting=false;
+    const reportError=error=>{if(reporting)return;reporting=true;try{options.onError?.(error);}catch{}finally{reporting=false;}};
+    const guard=fn=>(...args)=>{try{const result=fn(...args);result?.catch?.(reportError);return result;}catch(error){reportError(error);}};
     let disposed = false;
     const add = disposer => {
       if (typeof disposer !== 'function') return disposer;
@@ -10,18 +13,20 @@
     const api = {
       get disposed() { return disposed; },
       add,
+      reportError,
       listen(target, type, handler, options) {
-        target.addEventListener(type, handler, options);
-        add(() => target.removeEventListener(type, handler, options));
+        const listener=guard(handler);
+        target.addEventListener(type, listener, options);
+        add(() => target.removeEventListener(type, listener, options));
         return handler;
       },
       timeout(fn, ms) {
-        const id = setTimeout(fn, ms);
+        const id = setTimeout(guard(fn), ms);
         add(() => clearTimeout(id));
         return id;
       },
       frame(fn) {
-        const id = requestAnimationFrame(fn);
+        const id = requestAnimationFrame(guard(fn));
         add(() => cancelAnimationFrame(id));
         return id;
       },

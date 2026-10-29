@@ -47,6 +47,8 @@
     const $ = selector => shadow.querySelector(selector);
     const shell = $('.shell');
     const panel = $('.panel');
+    const EMPTY_SOURCE = {}, EMPTY_RESULTS = [];
+    let renderedSource,renderedResults,renderedEmptyStatus,availablePlan=[],renderFrame=null,pendingState,positioned=false,anchorKey='';
     let open = false;
     let state = store.get() || {};
     let drag = null;
@@ -76,11 +78,15 @@
     };
     const position = () => {
       const rect = $('.bot').getBoundingClientRect();
+      const nextAnchorKey=[rect.left,rect.top,rect.width,rect.height,window.innerWidth,window.innerHeight].join('|');
+      if(nextAnchorKey!==anchorKey){
+      anchorKey=nextAnchorKey;
       shell.style.setProperty('--toolbar-offset','0px');
       const toolbarRect = $('.quick-searches').getBoundingClientRect();
       const toolbarOffset = toolbarRect.left < 6 ? 6 - toolbarRect.left : toolbarRect.right > window.innerWidth - 6 ? window.innerWidth - 6 - toolbarRect.right : 0;
       shell.style.setProperty('--toolbar-offset',`${toolbarOffset}px`);
       shell.classList.toggle('status-right', rect.left < 310);
+      }
       if (!open) return;
       const placement = Layout.computePanelPlacement(rect, { width: 430, height: Math.min(680, panel.scrollHeight || 680) }, { width: window.innerWidth, height: window.innerHeight });
       Object.assign(panel.style, { left: `${placement.left}px`, top: `${placement.top}px`, width: `${placement.width}px`, maxHeight: `${placement.maxHeight}px` });
@@ -90,11 +96,16 @@
       shell.dataset.state = state.status || 'ready';
       if (!drag && state.status !== previousStatus) animateRobot(state.status === 'completed' ? 'celebrating' : restingMotion(), state.status === 'completed' ? 2400 : 0);
       previousStatus = state.status;
-      const source = state.source || {};
+      const source = state.source || EMPTY_SOURCE;
+      const sourceChanged=source!==renderedSource;
+      if(sourceChanged){
+      renderedSource=source;
+      availablePlan=state.source?Engine.createSearchPlan(state.source):[];
       $('.source-name').textContent = source.bannerName || 'Manual screen required';
       $('.source-meta').textContent = [state.profile === 'retailSync' ? 'Retail' : 'Store', source.storeNumber && `Store #${source.storeNumber}${source.storeNumberInferred ? ' (from banner)' : ''}`, address()].filter(Boolean).join(' · ');
       const fields = $('.fields'); fields.textContent = '';
       [['bannerName','Banner'],['storeNumber','Store #'],['address','Address'],['city','City'],['state','State'],['zip','ZIP'],['phone','Phone']].forEach(([key,label]) => { const button=document.createElement('button'); button.className='field'; button.dataset.copy=key; button.disabled=!source[key]; button.innerHTML=`<span>${label}</span><b></b>`; button.querySelector('b').textContent=source[key]||'Not available'; fields.appendChild(button); });
+      }
       const total = state.total || state.plan?.length || 0; const progress = state.progress || 0;
       const googleQuery = [source.bannerName, source.address, source.city, source.state, source.zip].filter(Boolean).join(' ');
       $('.fill').style.width = total ? `${Math.min(100, progress / total * 100)}%` : '0%';
@@ -111,18 +122,35 @@
       $('.google-banner-state').disabled = !source.bannerName || !source.state;
       $('.google-banner-city').disabled = !source.bannerName || !source.city;
       $('.notice').textContent=state.diagnostic || (state.status === 'ready' ? 'Ready.' : state.status === 'completed' ? 'Checks complete.' : state.status === 'paused' ? 'Paused. The current search may finish; Continue resumes the remaining checks.' : 'Checking current record.');
-      const availablePlan = state.source ? Engine.createSearchPlan(state.source) : [];
+
       const queryGroups = {banner:['banner-exact-zip','banner-wildcard-zip'],bannerState:['banner-state'],address:['address-city','address-zip'],phone:['phone'],store:['store-banner']};
       shadow.querySelectorAll('[data-search]').forEach(button => { const group=button.dataset.search; button.disabled=busy || !availablePlan.some(query => group==='all' || queryGroups[group]?.includes(query.type)); });
       const manualRequired = !state.source && !!state.diagnostic;
       $('.notice').dataset.tone = manualRequired ? 'warning' : 'info';
       $('.notice').setAttribute('role', manualRequired ? 'alert' : 'status');
+      const nextResults=state.results || EMPTY_RESULTS;
+      if(sourceChanged || renderedResults!==nextResults || (!nextResults.length && renderedEmptyStatus!==state.status)){
+      renderedResults=nextResults;renderedEmptyStatus=state.status;
       const results=$('.results'); results.textContent='';
       (state.results||[]).forEach((item,index)=>{ const candidate=item.candidate||item; const card=document.createElement('article'); card.className=`result ${item.directMatch?'direct':String(item.classification||'').startsWith('Exact')?'exact':''}`; card.innerHTML=`<div class="result-heading"><h4></h4><span class="record-status"></span></div><p class="kind"></p><p class="where"></p><p class="why"></p><p class="conflicts"></p><div class="result-actions"><button class="btn" data-icon="copy" data-result="td" data-index="${index}">TD Copy</button><button class="btn" data-icon="copy" data-result="full" data-index="${index}">Full Copy</button></div>`; const rawStatus=Engine.cleanText(candidate.storeStatus || candidate.copyFields?.find(field => /^(?:STORE_STATUS|SL_STORE_STATUS|RS_STORE_STATUS|STATUS)$/i.test(field.header))?.value); const pill=card.querySelector('.record-status'); const statusKey=rawStatus.toLowerCase().replace(/[^a-z]/g,''); const knownStatus={open:'Open',closed:'Closed',unverified:'Unverified',unverifyed:'Unverified',duplicate:'Duplicate'}; pill.textContent=knownStatus[statusKey] || rawStatus || 'Status unavailable'; pill.dataset.status=statusKey==='unverifyed'?'unverified':statusKey; pill.title=rawStatus ? `Record status: ${rawStatus}` : 'Record status was not provided'; card.querySelector('h4').textContent=candidate.bannerName||`SL_ID ${candidate.slId||'Unknown'}`; card.querySelector('.kind').textContent=item.classification||'Potential duplicate'; card.querySelector('.where').textContent=[candidate.address,candidate.city,candidate.state,candidate.zip].filter(Boolean).join(', '); const explanation=Engine.explainCandidate(state.source,item); card.querySelector('.why').textContent=explanation.summary; card.querySelector('.conflicts').textContent=explanation.conflicts.join('; '); decorateIcons(card); results.appendChild(card); });
       if (!(state.results||[]).length) { const empty=document.createElement('div');empty.className='empty';empty.textContent=state.status==='completed'?'No duplicates found.':'Run checks to see duplicate results.';results.appendChild(empty); }
-      position();
+      }
+      if(open || !positioned){position();positioned=true;}
     }
-    const unsubscribe = store.subscribe(render); lifecycle.add(unsubscribe);
+    function safeRender(next){
+      try{render(next);}catch(error){
+        renderedSource=undefined;renderedResults=undefined;
+        const notice=$('.notice');if(notice){notice.textContent='The panel could not update. Close and reopen Picker, then retry.';notice.dataset.tone='warning';}
+      }
+    }
+    const unsubscribe=store.subscribe(next=>{
+      pendingState=next;
+      if(!positioned){safeRender(next);return;}
+      if(renderFrame!=null)return;
+      renderFrame=window.requestAnimationFrame(()=>{renderFrame=null;if(!killing)safeRender(pendingState);});
+    });
+    lifecycle.add(unsubscribe);
+    lifecycle.add(()=>window.cancelAnimationFrame?.(renderFrame));
     function openPanel() { if(killing)return; open=true; $('.bot-status').hidden=true; panel.classList.add('open'); window.requestAnimationFrame(position); }
     function closePanel() { open=false; panel.classList.remove('open'); $('.bot-status').hidden=state.status==='ready'; position(); }
     function finishKill() {
@@ -157,7 +185,7 @@
       if(target.classList.contains('close')) return closePanel();
       if(target.classList.contains('quick-stop')) { controller.cancel(); return; }
       if(target.dataset.search || target.classList.contains('run') || target.classList.contains('retry')) { closePanel(); return controller.run(target.dataset.search || 'all').catch(error=>{ $('.notice').textContent=error.message; $('.bot').title=error.message; }); }
-      if(target.classList.contains('pause') || target.classList.contains('quick-pause')) return state.status==='paused'?controller.resume():controller.pause();
+      if(target.classList.contains('pause') || target.classList.contains('quick-pause')) return store.get()?.status==='paused'?controller.resume():controller.pause();
       if(target.classList.contains('cancel')) return controller.cancel();
       if(target.classList.contains('kill')) return kill();
       if(target.dataset.copy) return copy(state.source?.[target.dataset.copy]);

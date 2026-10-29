@@ -26,3 +26,21 @@ test('time spent paused does not exhaust the whole-run search budget',async()=>{
  await new Promise(resolve=>setTimeout(resolve,130));runner.resume();
  assert.equal((await running).status,'completed');assert.deepEqual(calls,['one','two']);
 });
+
+
+test('a rejected search becomes an incomplete observation and the next search still runs',async()=>{
+ const runner=createRunController({adapter:async query=>{if(query.id==='bad')throw Error('Page changed');return {status:'complete',rows:[{slId:'1'}]};},safetyDelayMs:0});
+ const result=await runner.start([{id:'bad'},{id:'good'}]);
+ assert.equal(result.status,'incomplete');assert.equal(result.observations.length,2);assert.match(result.observations[0].diagnostic,/Page changed/);assert.equal(result.observations[1].status,'complete');
+});
+
+test('Stop returns promptly even when an adapter ignores its abort signal',async()=>{
+ const runner=createRunController({adapter:()=>new Promise(()=>{}),queryTimeoutMs:10000,safetyDelayMs:0});
+ const running=runner.start([{id:'slow'}]);await tick();const started=Date.now();runner.cancel();
+ assert.equal((await running).status,'cancelled');assert.ok(Date.now()-started<200);
+});
+
+test('double-start returns a busy result instead of rejecting',async()=>{
+ let release;const runner=createRunController({adapter:()=>new Promise(resolve=>{release=resolve;}),safetyDelayMs:0});
+ const first=runner.start([{id:'one'}]);await tick();assert.equal((await runner.start([{id:'two'}])).status,'busy');release({status:'complete',rows:[]});await first;
+});

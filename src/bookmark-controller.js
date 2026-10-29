@@ -9,6 +9,7 @@
     const Adapter = root.PickerManualMatchAdapter;
     const Runner = root.PickerRunController;
     let runner = null;
+    let runBusy = false;
     let extraction = null;
     let destroyed = false;
     let revision = 0;
@@ -25,47 +26,59 @@
       runner?.cancel?.();
       runner = null;
     }
+    function readSource(includeCandidates = true) {
+      try {
+        const profile = extraction?.profile || 'storeView';
+        let found = Gsrs.extractFromDocument(doc,profile,{includeCandidates});
+        if (found?.error === 'profile-mismatch') found = Gsrs.extractFromDocument(doc,found.detectedProfile || (profile==='storeView'?'retailSync':'storeView'),{includeCandidates});
+        return found?.error || found?.source ? found : {error:'source-read-failed',diagnostic:'The current record is incomplete. Refresh the Manual screen and retry.'};
+      } catch { return {error:'source-read-failed',diagnostic:'The current record could not be read. Refresh the Manual screen and retry.'}; }
+    }
     function refresh() {
       if (destroyed) return;
-      let found = Gsrs.extractFromDocument(doc, 'storeView');
-      if (found?.error === 'profile-mismatch' || found?.detectedProfile === 'retailSync') found = Gsrs.extractFromDocument(doc, 'retailSync');
-      if (found?.error) {
-        if (extraction || store.get()?.source) scan();
+      const found = readSource(false);
+      if (found.error) {
+        if (extraction || store.get()?.source) scan(found);
       } else if (signature(found) !== signature(extraction)) scan();
     }
-    // Observe only the page DOM: the bot renders in its own shadow root.
+    // Ignore result/filter animation updates; source edits and record selection remain immediate.
     if (win.MutationObserver && doc.documentElement && lifecycle.observe) {
       let pending = null;
-      const observer = new win.MutationObserver(() => {
-        win.clearTimeout(pending);
-        pending = win.setTimeout(refresh, 100);
+      const ignored = '[data-testid="manual-match-search-table"],.horizontalPanelMM,#picker-bookmark-v1-host';
+      const observer = new win.MutationObserver(records => {
+        const relevant = records.some(record => {
+          const element = record.target.nodeType===1?record.target:record.target.parentElement;
+          if (element?.closest?.(ignored)) return false;
+          if (record.type==='attributes' || record.type==='characterData') return !!element?.closest?.('[data-testid="manual-match-table"]');
+          return true;
+        });
+        if (!relevant || pending != null) return;
+        pending = win.setTimeout(() => { pending=null; refresh(); },100);
       });
-      lifecycle.observe(observer, doc.documentElement, { childList: true, subtree: true, characterData: true, attributes: true });
+      lifecycle.observe(observer,doc.documentElement,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['class','aria-selected','data-selected']});
       lifecycle.add(() => win.clearTimeout(pending));
     }
     if (win.setInterval && lifecycle.add) {
-      const timer = win.setInterval(refresh, 750);
+      const timer = win.setInterval(() => {if(!doc.hidden)refresh();},2500);
       lifecycle.add(() => win.clearInterval(timer));
     }
 
-    function scan() {
+    function scan(found = readSource()) {
       if (destroyed) return { error: 'bookmark-destroyed' };
-      let found = Gsrs.extractFromDocument(doc, 'storeView');
-      if (found?.error === 'profile-mismatch' || found?.detectedProfile === 'retailSync') found = Gsrs.extractFromDocument(doc, 'retailSync');
+      let normalized;
+      if(!found?.error){try{normalized=Engine.normalizeSource?Engine.normalizeSource(found.source):{...found.source,zip:Engine.normalizeZip(found.source.zip)};}catch{found={error:'source-read-failed',diagnostic:'The current record could not be prepared. Refresh the Manual screen and retry.'};}}
       invalidate();
       extraction = null;
       if (found?.error) {
-        store.set({ status: 'error', diagnostic: 'You need to be in the Manual screen to activate me.', diagnosticCode: found.error, source: null, results: [], linksSearch: null, tdIds: [], initialCandidates: [], observations: [], plan: [], progress: 0, total: 0, activeQuery: null });
+        store.set({ status: 'error', diagnostic: found.diagnostic || 'You need to be in the Manual screen to activate me.', diagnosticCode: found.error, source: null, results: [], linksSearch: null, tdIds: [], initialCandidates: [], observations: [], plan: [], progress: 0, total: 0, activeQuery: null });
         return found;
       }
       extraction = found;
-      store.set({ status: 'ready', profile: found.profile, source: Engine.normalizeSource ? Engine.normalizeSource(found.source) : { ...found.source, zip: Engine.normalizeZip(found.source.zip) }, initialCandidates: found.candidates || [], sourceRowCount: found.sourceRowCount, initialCandidateCount: found.initialCandidateCount, results: [], linksSearch: null, tdIds: [], observations: [], plan: [], progress: 0, total: 0, activeQuery: null, diagnostic: '', diagnosticCode: '' });
+      store.set({ status: 'ready', profile: found.profile, source: normalized, initialCandidates: found.candidates || [], sourceRowCount: found.sourceRowCount, initialCandidateCount: found.initialCandidateCount, results: [], linksSearch: null, tdIds: [], observations: [], plan: [], progress: 0, total: 0, activeQuery: null, diagnostic: '', diagnosticCode: '' });
       return found;
     }
 
-    async function run(group = 'all') {
-      if (destroyed) throw new Error('Bookmark was closed');
-      if (completionAborter || runner?.isActive?.()) throw new Error('A duplicate check is already active');
+    async function runChecks(group = 'all') {
       scan();
       const runRevision = revision;
       const current = store.get();
@@ -78,11 +91,11 @@
         return result;
       }
       runner = Runner.createRunController({
-        adapter: (query, runOptions) => Adapter.execute(query, { ...runOptions, timeoutMs: 30000, stableMs: 1500, profile: current.profile }),
+        adapter: (query, runOptions) => Adapter.execute(query, { ...runOptions, timeoutMs: 30000, stableMs: 600, profile: current.profile, isCurrent:() => { refresh(); return !destroyed && revision === runRevision; } }),
         onState: state => { if (!destroyed && runRevision === revision) store.set(state.status === 'completed' ? {...state,status:'running'} : state); },
         queryTimeoutMs: 30000,
         runTimeoutMs: 180000,
-        safetyDelayMs: 900
+        safetyDelayMs: 150
       });
       const runResult = await runner.start(plan);
       refresh();
@@ -97,7 +110,7 @@
         completionAborter = aborter;
         store.set({status:'waiting',results,tdIds,activeQuery:{type:'links',label:`Reviewing links for the top ${tdIds.length} matches...`},progress:plan.length,total:plan.length+1});
         try {
-          linksSearch = await root.PickerBookmarkLinks.execute(tdIds,{profile:current.profile,signal:aborter.signal,timeoutMs:30000,stableMs:1500,beforeSubmit:waitForContinue,
+          linksSearch = await root.PickerBookmarkLinks.execute(tdIds,{profile:current.profile,signal:aborter.signal,timeoutMs:30000,stableMs:600,beforeSubmit:waitForContinue,
             isCurrent:() => { refresh(); return !destroyed && revision === runRevision; }});
           await waitForContinue();
         } finally { if(completionAborter === aborter)completionAborter = null; }
@@ -112,6 +125,25 @@
       store.set(result);
       runner = null;
       return result;
+    }
+
+    async function run(group = 'all') {
+      if (destroyed) return {status:'cancelled',observations:[],results:[]};
+      if (runBusy) return {status:'busy',diagnostic:'A search is already running. Use Pause or Stop before starting another.'};
+      runBusy=true;
+      let runRevision=revision;
+      try {
+        const pending=runChecks(group);
+        runRevision=revision;
+        return await pending;
+      } catch (error) {
+        completionAborter?.abort(); runner?.cancel?.();
+        if(destroyed || revision!==runRevision)return {status:'cancelled',observations:[],results:[]};
+        const current=store.get() || {};
+        const message=String(error?.message || 'Unexpected search failure').split(/[\r\n]/)[0].slice(0,180);
+        const result={status:'incomplete',observations:current.observations || [],results:current.results || [],activeQuery:null,diagnostic:`Search stopped safely: ${message}. Retry the search.`};
+        store.set(result); return result;
+      } finally { clearPause(); runner=null; completionAborter=null; runBusy=false; }
     }
 
     function cancel() { clearPause(); runner?.cancel?.(); completionAborter?.abort(); }

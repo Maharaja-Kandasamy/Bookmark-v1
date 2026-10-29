@@ -4,10 +4,14 @@
   if (root) root.PickerRunController = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
-  const timeout = async (promise, ms, onTimeout) => {
-    let timer;
-    try { return await Promise.race([promise, new Promise(resolve => { timer = setTimeout(() => { onTimeout?.(); resolve({status:'incomplete',rows:[],diagnostic:`Timed out after ${Math.round(ms / 1000)} seconds`}); }, ms); })]); }
-    finally { clearTimeout(timer); }
+  const timeout = async (promise,ms,onTimeout,signal) => {
+    let timer,onAbort,timedOut=false;
+    try { return await Promise.race([promise,new Promise(resolve => {
+      onAbort=()=>{if(!timedOut)resolve({status:'incomplete',rows:[],diagnostic:'Search cancelled'});};
+      signal?.addEventListener('abort',onAbort,{once:true});
+      if(signal?.aborted)onAbort();
+      timer=setTimeout(()=>{timedOut=true;onTimeout?.();resolve({status:'incomplete',rows:[],diagnostic:`Timed out after ${Math.round(ms/1000)} seconds`});},ms);
+    })]); } finally {clearTimeout(timer);signal?.removeEventListener('abort',onAbort);}
   };
 
   function createRunController(options) {
@@ -28,7 +32,7 @@
     const awaitResume = () => paused ? new Promise(resolve => { resumeResolve = resolve; }) : Promise.resolve();
 
     async function start(plan) {
-      if (active) throw new Error('A duplicate check is already active');
+      if (active) return {status:'busy',observations:[],diagnostic:'A search is already running'};
       active = true; paused = false; cancelled = false;
       const startedAt = Date.now();
       pausedMs = 0; pauseStarted = 0;
@@ -45,7 +49,7 @@
           const remainingMs = Math.max(1, runTimeoutMs - elapsed());
           const aborter = new AbortController();
           currentAborter = aborter;
-          const result = await timeout(Promise.resolve().then(() => adapter(query, { signal: aborter.signal })), Math.min(queryTimeoutMs, remainingMs), () => aborter.abort());
+          const result = await timeout(Promise.resolve().then(() => adapter(query, { signal: aborter.signal })).catch(error => ({status:'incomplete',rows:[],diagnostic:'Search could not finish: '+String(error?.message || 'Unexpected failure').split(/[\r\n]/)[0].slice(0,180)})), Math.min(queryTimeoutMs, remainingMs), () => aborter.abort(),aborter.signal);
           currentAborter = null;
           observations.push({ queryId: query.id, query, ...result });
           publish({ status: 'running', progress: index + 1, total: plan.length, observations, progressText: `Search ${index + 1} of ${plan.length}` });
@@ -54,7 +58,8 @@
         await awaitResume();
         const incomplete = observations.some(item => item.status !== 'complete') || observations.length < plan.length;
         const status = cancelled ? 'cancelled' : incomplete ? 'incomplete' : 'completed';
-        const result = { status, observations, progress: observations.length, total: plan.length };
+        const diagnostic = cancelled ? 'Search stopped.' : incomplete ? (observations.find(item => item.status !== 'complete')?.diagnostic || 'Not all checks finished. Retry the incomplete searches.') : '';
+        const result = { status, observations, progress: observations.length, total: plan.length, diagnostic };
         publish(result);
         return result;
       } finally {

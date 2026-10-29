@@ -44,3 +44,18 @@ test('lifecycle dispose unregisters every resource exactly once', () => {
   assert.equal(calls.filter(x => x[0] === 'custom').length, 1);
   assert.equal(lifecycle.disposed, true);
 });
+
+
+test('store skips unchanged updates and isolates failing subscribers',()=>{
+ const Store=load('bookmark-store.js','PickerBookmarkStore');const errors=[];const store=Store.create({status:'ready'},{onError:error=>errors.push(error.message)});let calls=0;
+ store.subscribe(()=>{calls++;});store.set({status:'ready'});assert.equal(calls,1);
+ store.subscribe(()=>{throw Error('Bad listener');});store.set({status:'waiting'});assert.equal(calls,2);assert.deepEqual(errors,['Bad listener','Bad listener']);
+});
+
+test('lifecycle catches synchronous and asynchronous event-handler failures',async()=>{
+ const Lifecycle=load('bookmark-lifecycle.js','PickerBookmarkLifecycle');const errors=[];const lifecycle=Lifecycle.create({onError:error=>errors.push(error.message)});let listener;
+ const target={addEventListener:(_type,fn)=>{listener=fn;},removeEventListener(){}};
+ lifecycle.listen(target,'click',()=>{throw Error('Sync action');});listener();
+ lifecycle.listen(target,'click',async()=>{throw Error('Async action');});listener();await new Promise(resolve=>setTimeout(resolve,0));
+ assert.deepEqual(errors,['Sync action','Async action']);lifecycle.dispose();
+});
