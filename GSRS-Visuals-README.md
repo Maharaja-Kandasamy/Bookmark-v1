@@ -25,7 +25,7 @@ You may select 100 manually instead. Fewer than 100 available results is normal.
 Only the current page is counted; other pages are not fetched or aggregated.
 Recheck recalculates the visible data. Remove clears all tool styling and observers.
 Normal table updates are rechecked while active. Full page refresh clears activation.
-Repeated bookmark clicks reuse the same panel. No MATCH/REVIEW checkbox is clicked.
+Repeated bookmark clicks reuse the same panel. MATCH is clicked only by the explicit Select all-green rows action; REVIEW is untouched.
 
 ## Matching rules
 Each child is compared against its OWN parent in the same field.
@@ -41,7 +41,7 @@ Exact / green:
 Partial / amber (called moderate for addresses):
 - Shared street names are amber when house numbers, ranges, units, directions or street types differ. There is no house-number distance limit. Street types alone (Rd/Hwy) do not establish a match.
 - Store/city name has whole-word containment with at least three compact characters.
-- US five-digit ZIP matches the prefix of a nine-digit ZIP.
+A US five-digit ZIP matching the prefix of a nine-digit ZIP is green.
 No Match / uncolored: other nonblank differences.
 Blank on EITHER side: no highlight and excluded from Exact/Partial/No Match totals.
 Unknown address differences and route-number changes stay uncolored. Different or missing unit details are amber when the main address matches.
