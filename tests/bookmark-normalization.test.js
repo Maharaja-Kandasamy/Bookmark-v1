@@ -230,3 +230,11 @@ test('generic business descriptors are omitted from every banner search without 
  const cleanPlan=engine.createSearchPlan({bannerName:'Quick Stop Store',zip:'46805'});
  assert.equal(cleanPlan.find(q=>q.type==='banner-exact-zip').fields.banner,'quick stop');
 });
+
+
+test('banner plus state has its own query without requiring a ZIP',()=>{
+ const plan=engine.createSearchPlan({bannerName:'QUICK STOP C STORE 5',state:'IN'});
+ assert.deepEqual(plan.map(q=>q.type),['banner-state']);
+ assert.deepEqual(plan[0].fields,{banner:'quic*stop*',state:'IN'});
+ assert.equal(engine.createSearchPlan({bannerName:'Quick Stop'}).some(q=>q.type==='banner-state'),false);
+});

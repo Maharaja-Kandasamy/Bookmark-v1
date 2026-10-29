@@ -109,13 +109,13 @@ test('missing Manual screen shows activation warning and clears it when source b
 });
 
 test('separate searches run only their own group while All Search includes every query', async () => {
- const types=['banner-exact-zip','banner-wildcard-zip','address-city','address-zip','phone','store-banner'];
+ const types=['banner-exact-zip','banner-wildcard-zip','address-city','address-zip','phone','store-banner','banner-state'];
  const {controller}=setup({PickerDuplicateEngine:{
   normalizeZip: require('../vendor/duplicate-engine').normalizeZip,
   createSearchPlan:()=>types.map(type=>({id:type,type})),
   consolidateCandidates:()=>[]
  }});
- for(const [group,expected] of [['banner',types.slice(0,2)],['address',types.slice(2,4)],['phone',['phone']],['store',['store-banner']],['all',types]]){
+ for(const [group,expected] of [['banner',types.slice(0,2)],['address',types.slice(2,4)],['phone',['phone']],['store',['store-banner']],['bannerState',['banner-state']],['all',types]]){
   const result=await controller.run(group);
   assert.deepEqual(Array.from(result.plan,q=>q.type),expected);
   assert.deepEqual(Array.from(result.observations,q=>q.queryId),expected);
@@ -169,4 +169,25 @@ test('banner store number fills the bot source and drives the store search witho
  assert.equal(result.plan[0].fields.storeNumber,'00123');
  assert.equal(result.plan[0].fields.banner,'acme*');
  assert.equal(source.storeNumber,'');
+});
+
+
+test('pause during final Links review holds completion until Continue and Stop releases it',async()=>{
+ for(const stop of [false,true]){
+  let started,finish;
+  const ready=new Promise(resolve=>{started=resolve;});
+  const {controller,store}=setup({
+   PickerDuplicateEngine:{normalizeZip:require('../vendor/duplicate-engine').normalizeZip,createSearchPlan:()=>[{id:'one'}],consolidateCandidates:()=>[{candidate:{slId:'0067788'}}],getTopTdIds:()=>['0067788']},
+   PickerBookmarkLinks:{execute:()=>{started();return new Promise(resolve=>{finish=resolve;});}}
+  });
+  let finished=false;
+  const running=controller.run().then(result=>{finished=true;return result;});
+  await ready;
+  controller.pause();
+  finish({status:'complete'});
+  await new Promise(resolve=>setTimeout(resolve,5));
+  assert.equal(store.get().status,'paused');assert.equal(finished,false);
+  if(stop)controller.cancel();else controller.resume();
+  assert.equal((await running).status,stop?'cancelled':'completed');
+ }
 });

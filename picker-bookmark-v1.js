@@ -149,6 +149,7 @@
     const bannerNeedsWildcard = /[0-9]|[^a-z0-9\s]|\band\b/i.test(source.bannerName);
     const candidates = [
       !bannerNeedsWildcard && bannerWildcard && source.zip3 && { type: 'banner-exact-zip', label: 'Exact banner + ZIP3', fields: { banner: bannerSearchWords(source.bannerName).join(' '), zip: source.zip3 } },
+      bannerWildcard && cleanText(source.state) && { type: 'banner-state', label: 'Wildcard banner + state', fields: { banner: bannerWildcard, state: cleanText(source.state) } },
       bannerWildcard && source.zip3 && { type: 'banner-wildcard-zip', label: 'Wildcard banner + ZIP3', fields: { banner: bannerWildcard, zip: source.zip3 } },
       addressWildcard && source.city && { type: 'address-city', label: 'Wildcard address + city', fields: { address: addressWildcard, city: source.city } },
       addressWildcard && source.zip3 && { type: 'address-zip', label: 'Wildcard address + ZIP3', fields: { address: addressWildcard, zip: source.zip3 } },
@@ -274,10 +275,11 @@
   if (root) root.PickerRunController = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
-  const timeout = (promise, ms, onTimeout) => Promise.race([
-    promise,
-    new Promise(resolve => setTimeout(() => { onTimeout?.(); resolve({ status: 'incomplete', rows: [], diagnostic: `Timed out after ${Math.round(ms / 1000)} seconds` }); }, ms))
-  ]);
+  const timeout = async (promise, ms, onTimeout) => {
+    let timer;
+    try { return await Promise.race([promise, new Promise(resolve => { timer = setTimeout(() => { onTimeout?.(); resolve({status:'incomplete',rows:[],diagnostic:`Timed out after ${Math.round(ms / 1000)} seconds`}); }, ms); })]); }
+    finally { clearTimeout(timer); }
+  };
 
   function createRunController(options) {
     const adapter = options.adapter;
@@ -290,24 +292,28 @@
     let cancelled = false;
     let resumeResolve = null;
     let currentAborter = null;
+    let pauseStarted = 0;
+    let pausedMs = 0;
 
-    const publish = state => onState({ updatedAt: Date.now(), ...state });
+    const publish = state => onState({ updatedAt: Date.now(), ...state, ...(paused && ['running','waiting'].includes(state.status) ? {status:'paused'} : {}) });
     const awaitResume = () => paused ? new Promise(resolve => { resumeResolve = resolve; }) : Promise.resolve();
 
     async function start(plan) {
       if (active) throw new Error('A duplicate check is already active');
       active = true; paused = false; cancelled = false;
       const startedAt = Date.now();
+      pausedMs = 0; pauseStarted = 0;
+      const elapsed = () => Date.now() - startedAt - pausedMs - (paused ? Date.now() - pauseStarted : 0);
       const observations = [];
       try {
         publish({ status: 'running', progress: 0, total: plan.length, progressText: `Search 0 of ${plan.length}` });
         for (let index = 0; index < plan.length; index += 1) {
-          if (cancelled || Date.now() - startedAt >= runTimeoutMs) break;
-          await awaitResume();
           if (cancelled) break;
+          await awaitResume();
+          if (cancelled || elapsed() >= runTimeoutMs) break;
           const query = plan[index];
           publish({ status: 'waiting', progress: index + 1, total: plan.length, activeQuery: query, progressText: `Search ${index + 1} of ${plan.length}` });
-          const remainingMs = Math.max(1, runTimeoutMs - (Date.now() - startedAt));
+          const remainingMs = Math.max(1, runTimeoutMs - elapsed());
           const aborter = new AbortController();
           currentAborter = aborter;
           const result = await timeout(Promise.resolve().then(() => adapter(query, { signal: aborter.signal })), Math.min(queryTimeoutMs, remainingMs), () => aborter.abort());
@@ -316,6 +322,7 @@
           publish({ status: 'running', progress: index + 1, total: plan.length, observations, progressText: `Search ${index + 1} of ${plan.length}` });
           if (index < plan.length - 1 && !cancelled) await wait(safetyDelayMs);
         }
+        await awaitResume();
         const incomplete = observations.some(item => item.status !== 'complete') || observations.length < plan.length;
         const status = cancelled ? 'cancelled' : incomplete ? 'incomplete' : 'completed';
         const result = { status, observations, progress: observations.length, total: plan.length };
@@ -328,8 +335,8 @@
 
     return {
       start,
-      pause() { if (active) { paused = true; publish({ status: 'paused' }); } },
-      resume() { if (active && paused) { paused = false; if (resumeResolve) resumeResolve(); resumeResolve = null; publish({ status: 'running' }); } },
+      pause() { if (active && !paused) { paused = true; pauseStarted = Date.now(); publish({ status: 'paused' }); } },
+      resume() { if (active && paused) { pausedMs += Date.now() - pauseStarted; paused = false; if (resumeResolve) resumeResolve(); resumeResolve = null; publish({ status: 'running' }); } },
       cancel() { cancelled = true; paused = false; currentAborter?.abort(); if (resumeResolve) resumeResolve(); resumeResolve = null; publish({ status: 'cancelled' }); },
       isActive() { return active; }
     };
@@ -851,6 +858,8 @@
         .filter(el => !el.disabled && ['search','searchlinks','linkssearch'].includes(norm(el.getAttribute('aria-label') || el.textContent || el.value)));
       if (searches.length !== 1) return {status:'incomplete',diagnostic:searches.length?'Multiple Search buttons found in Links search':'Links Search button not found',value};
       if (!current()) return {status:'incomplete',diagnostic:'Links search cancelled or source changed',value};
+      await options.beforeSubmit?.();
+      if (!current()) return {status:'incomplete',diagnostic:'Links search cancelled or source changed',value};
       const result = await Adapter.submitAndWait(dialog,searches[0],options);
       return {...result,value,tdIds:[...ids]};
     } catch (error) {
@@ -882,9 +891,14 @@
     let destroyed = false;
     let revision = 0;
     let completionAborter = null;
+    let paused = false;
+    let continueResolve = null;
+    const waitForContinue = () => paused ? new Promise(resolve => { continueResolve = resolve; }) : Promise.resolve();
+    function clearPause() { paused = false; continueResolve?.(); continueResolve = null; }
     const signature = found => JSON.stringify([found?.profile, found?.source || null]);
     function invalidate() {
       revision++;
+      clearPause();
       completionAborter?.abort();
       runner?.cancel?.();
       runner = null;
@@ -934,7 +948,7 @@
       const runRevision = revision;
       const current = store.get();
       if (!current?.source) return { status: 'error', observations: [], diagnostic: current?.diagnostic || 'Source table not found' };
-      const groups = { banner: ['banner-exact-zip','banner-wildcard-zip'], address: ['address-city','address-zip'], phone: ['phone'], store: ['store-banner'] };
+      const groups = { banner: ['banner-exact-zip','banner-wildcard-zip'], bannerState: ['banner-state'], address: ['address-city','address-zip'], phone: ['phone'], store: ['store-banner'] };
       const plan = Engine.createSearchPlan(current.source).filter(query => group === 'all' || groups[group]?.includes(query.type));
       if (!plan.length) {
         const result = { status: 'incomplete', observations: [], progress: 0, total: 0, diagnostic: 'Not enough source data to create searches' };
@@ -961,8 +975,9 @@
         completionAborter = aborter;
         store.set({status:'waiting',results,tdIds,activeQuery:{type:'links',label:`Reviewing links for the top ${tdIds.length} matches...`},progress:plan.length,total:plan.length+1});
         try {
-          linksSearch = await root.PickerBookmarkLinks.execute(tdIds,{profile:current.profile,signal:aborter.signal,timeoutMs:30000,stableMs:1500,
+          linksSearch = await root.PickerBookmarkLinks.execute(tdIds,{profile:current.profile,signal:aborter.signal,timeoutMs:30000,stableMs:1500,beforeSubmit:waitForContinue,
             isCurrent:() => { refresh(); return !destroyed && revision === runRevision; }});
+          await waitForContinue();
         } finally { if(completionAborter === aborter)completionAborter = null; }
         if (aborter.signal.aborted && linksSearch) linksSearch = {...linksSearch,status:'cancelled'};
         refresh();
@@ -977,15 +992,16 @@
       return result;
     }
 
-    function cancel() { runner?.cancel?.(); completionAborter?.abort(); }
-    function pause() { runner?.pause?.(); }
-    function resume() { runner?.resume?.(); }
+    function cancel() { clearPause(); runner?.cancel?.(); completionAborter?.abort(); }
+    function pause() { if (!runner?.isActive?.() && !completionAborter) return; paused = true; runner?.pause?.(); store.set({status:'paused'}); }
+    function resume() { if (!paused) return; clearPause(); runner?.resume?.(); store.set({status:completionAborter?'waiting':'running'}); }
     function openExternal(url) {
       try { return !!win.open(url, '_blank', 'noopener,noreferrer'); } catch { return false; }
     }
     function destroy() {
       if (destroyed) return;
       destroyed = true;
+      clearPause();
       completionAborter?.abort();
       runner?.cancel?.();
       runner = null;
@@ -1008,7 +1024,7 @@
     if(state.status === 'paused')return 'Paused';
     if(state.activeQuery?.type === 'links')return `Reviewing links for the top ${(state.tdIds || []).length} matches...`;
     const type=state.activeQuery?.type || '';
-    const name=type.startsWith('address')?'address':type.startsWith('banner')?'business name':type==='phone'?'phone':type==='store-banner'?'store number':'records';
+    const name=type==='banner-state'?'business name + state':type.startsWith('address')?'address':type.startsWith('banner')?'business name':type==='phone'?'phone':type==='store-banner'?'store number':'records';
     if(['running','waiting'].includes(state.status))return state.activeQuery ? `Searching ${name} · ${state.progress || 0} of ${state.total || 0}` : 'Starting searches...';
     return 'Ready';
   }
@@ -1028,19 +1044,19 @@
         .panel{display:none;position:fixed;width:min(430px,calc(100vw - 24px));max-height:calc(100vh - 24px);background:var(--surface);border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 12px 32px rgba(15,23,42,.16);overflow:hidden}.panel.open{display:flex;flex-direction:column}.head{min-height:56px;padding:10px 12px;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px}.logo{width:30px;height:30px;border-radius:6px;background:var(--accent);color:#fff;display:grid;place-items:center;font-size:11px;font-weight:750}.title{font-size:13px;font-weight:700}.sub{font-size:10px;color:var(--muted);margin-top:1px}.close{margin-left:auto;width:32px;padding:0;justify-content:center}.scroll{padding:12px;overflow:auto}.source{padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--subtle)}.source strong{display:block;font-size:13px;font-weight:650}.meta,.notice{font-size:10px;color:var(--muted);line-height:1.45;margin-top:4px;overflow-wrap:anywhere}.notice{padding:8px 10px;background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;border-radius:6px;margin:12px 0}.label{font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin:16px 0 6px}.fields,.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.field,.btn{min-height:34px;border:1px solid #cbd5e1;background:var(--surface);color:#334155;border-radius:6px;padding:7px 9px;font:600 10px inherit;cursor:pointer;text-align:left;transition:background .15s,border-color .15s}.btn{display:inline-flex;align-items:center;gap:6px}.btn svg{width:14px;height:14px;flex:none}.field span{display:block;font-size:8px;color:var(--muted);text-transform:uppercase;font-weight:650}.field b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}.field:hover,.btn:hover:not(:disabled){border-color:#94a3b8;background:#f1f5f9}.field:focus-visible,.btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.btn:disabled,.field:disabled{opacity:.48;cursor:not-allowed}.primary{background:var(--accent);border-color:var(--accent);color:#fff}.primary:hover:not(:disabled){background:var(--accent-hover);border-color:var(--accent-hover)}.progress{height:6px;background:#e2e8f0;border-radius:6px;overflow:hidden;margin-top:8px}.fill{height:100%;width:0;background:var(--accent);transition:width .25s}.result{border:1px solid var(--border);border-left:3px solid var(--warning);border-radius:8px;padding:10px;margin-top:8px}.result.direct{border-left-color:var(--error);background:#fffafa}.result.exact{border-left-color:var(--success)}.result h4{font-size:11px;margin:0 0 5px;font-weight:650}.result p{font-size:10px;color:#526174;margin:3px 0}.result-actions{display:flex;gap:8px;margin-top:8px}.empty{border:1px dashed #cbd5e1;border-radius:8px;padding:16px;text-align:center;color:var(--muted);font-size:10px}.actions{padding:10px 12px;border-top:1px solid var(--border);background:var(--subtle);display:flex;justify-content:flex-end}.danger{color:var(--error);border-color:#fecaca}.dragging{user-select:none}
         .result-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}.result-heading h4{min-width:0;overflow-wrap:anywhere}.record-status{display:inline-block;flex:none;max-width:50%;overflow-wrap:anywhere;border:1px solid #cbd5e1;border-radius:999px;padding:2px 7px;font-size:9px;font-weight:650;line-height:1.4;background:#f1f5f9;color:#475569}.record-status[data-status=open]{background:#f0fdf4;border-color:#bbf7d0;color:#166534}.record-status[data-status=closed]{background:#fef2f2;border-color:#fecaca;color:#991b1b}.record-status[data-status=unverified]{background:#fffbeb;border-color:#fde68a;color:#92400e}.record-status[data-status=duplicate]{background:#eff6ff;border-color:#bfdbfe;color:#1e40af}
         .notice[data-tone=warning]{background:#fffbeb;border-color:#fde68a;color:#92400e;font-weight:600}
-        .quick-searches{position:absolute;bottom:calc(100% + 4px);left:50%;transform:translateX(-50%);display:flex;gap:3px;padding:3px;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 2px 8px #0f172a18}.quick-search{width:25px;height:25px;padding:0;border:1px solid #cbd5e1;border-radius:5px;background:#fff;color:#1e40af;font:600 10px Segoe UI,sans-serif;cursor:pointer}.quick-search:hover{background:#eff6ff}.quick-search:disabled{opacity:.4;cursor:not-allowed}.quick-search:focus-visible{outline:2px solid #2563eb;outline-offset:2px}
-        .bot-status{position:absolute;right:calc(100% + 10px);bottom:42px;display:flex;align-items:center;gap:8px;width:max-content;max-width:220px;padding:7px 9px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;color:#334155;box-shadow:0 2px 8px #0f172a18;font:500 11px Segoe UI,sans-serif}.bot-status[hidden]{display:none}.status-right .bot-status{right:auto;left:calc(100% + 10px)}.bot-progress{max-width:160px;overflow-wrap:anywhere}.quick-stop{border:1px solid #fecaca;background:#fef2f2;color:#991b1b;border-radius:5px;padding:4px 7px;font-size:10px;cursor:pointer}.quick-stop[hidden]{display:none}.conflicts{color:#92400e!important}.source-inference{font-size:10px;color:#64748b}
+        .quick-searches{position:absolute;bottom:calc(100% + 4px);left:calc(50% + var(--toolbar-offset,0px));transform:translateX(-50%);display:flex;gap:3px;padding:3px;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 2px 8px #0f172a18}.quick-search{width:25px;height:25px;padding:0;border:1px solid #cbd5e1;border-radius:5px;background:#fff;color:#1e40af;font:600 10px Segoe UI,sans-serif;cursor:pointer}.quick-search:hover{background:#eff6ff}.quick-search:disabled{opacity:.4;cursor:not-allowed}.quick-search:focus-visible{outline:2px solid #2563eb;outline-offset:2px}
+        .bot-status{position:absolute;right:calc(100% + 10px);bottom:42px;display:flex;align-items:center;gap:8px;width:max-content;max-width:min(290px,calc(100vw - 164px));flex-wrap:wrap;padding:7px 9px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;color:#334155;box-shadow:0 2px 8px #0f172a18;font:500 11px Segoe UI,sans-serif}.bot-status[hidden]{display:none}.status-right .bot-status{right:auto;left:calc(100% + 10px)}.bot-progress{max-width:160px;overflow-wrap:anywhere}.quick-pause{border:1px solid #bfdbfe;background:#eff6ff;color:#1e40af;border-radius:5px;padding:4px 7px;font-size:10px;cursor:pointer}.quick-pause[hidden]{display:none}.quick-stop{border:1px solid #fecaca;background:#fef2f2;color:#991b1b;border-radius:5px;padding:4px 7px;font-size:10px;cursor:pointer}.quick-stop[hidden]{display:none}.conflicts{color:#92400e!important}.source-inference{font-size:10px;color:#64748b}
         ${root.PickerBookmarkRobot.css}
       </style>
       <div class="shell" data-state="ready">
-        <div class="bot-status" hidden><span class="bot-progress" role="status" aria-live="polite"></span><button class="quick-stop" aria-label="Stop searches">Stop</button></div>
-        <div class="quick-searches" aria-label="Automation searches"><button class="quick-search" data-search="banner" title="Banner searches" aria-label="Banner searches">B</button><button class="quick-search" data-search="address" title="Address searches" aria-label="Address searches">A</button><button class="quick-search" data-search="phone" title="Phone search" aria-label="Phone search">P</button><button class="quick-search" data-search="store" title="Store number search" aria-label="Store number search">S</button><button class="quick-search" data-search="all" title="All Search" aria-label="All Search">All</button></div>
+        <div class="bot-status" hidden><span class="bot-progress" role="status" aria-live="polite"></span><button class="quick-pause" aria-label="Pause searches" title="Pause after the current search finishes">Pause</button><button class="quick-stop" aria-label="Stop searches">Stop</button></div>
+        <div class="quick-searches" aria-label="Automation searches"><button class="quick-search" data-search="banner" title="Banner searches" aria-label="Banner searches">B</button><button class="quick-search" data-search="bannerState" title="Banner + State search" aria-label="Banner + State search">BS</button><button class="quick-search" data-search="address" title="Address searches" aria-label="Address searches">A</button><button class="quick-search" data-search="phone" title="Phone search" aria-label="Phone search">P</button><button class="quick-search" data-search="store" title="Store number search" aria-label="Store number search">S</button><button class="quick-search" data-search="all" title="All Search" aria-label="All Search">All</button></div>
         <button class="bot" title="Open Picker Bookmark v1" aria-label="Open Picker Bookmark v1">
           ${root.PickerBookmarkRobot.svg}
         </button>
         <section class="panel" aria-label="Picker Bookmark v1">
           <div class="head"><img class="logo" src="data:image/png;base64,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" alt="Picker logo"><div><div class="title">Picker Bookmark v1</div><div class="sub">Store and Retail duplicate checks</div></div><button class="btn close" data-icon="close" aria-label="Close panel"></button></div>
-          <div class="scroll"><div class="source"><strong class="source-name">Reading source</strong><div class="meta source-meta"></div></div><div class="fields"></div><div class="notice" role="status">Ready.</div><div class="label">Duplicate checks</div><div class="progress"><div class="fill"></div></div><div class="meta progress-text"></div><div class="grid controls"><button class="btn primary run" data-icon="play">Run All Checks</button><button class="btn" data-search="banner">Banner</button><button class="btn" data-search="address">Address</button><button class="btn" data-search="phone">Phone</button><button class="btn" data-search="store">Store</button><button class="btn retry" data-icon="refresh">Retry Incomplete</button><button class="btn pause" data-icon="pause">Pause</button><button class="btn cancel" data-icon="square">Cancel</button></div><div class="label">Store tools</div><div class="grid"><button class="btn google-search" data-icon="search">Google Search</button><button class="btn address-search" data-icon="search">Google Address Search</button><button class="btn map-search" data-icon="map">Map Address Search</button><button class="btn copy-store" data-icon="copy">Copy Store Data</button></div><div class="label">Results</div><div class="results"></div></div>
+          <div class="scroll"><div class="source"><strong class="source-name">Reading source</strong><div class="meta source-meta"></div></div><div class="fields"></div><div class="notice" role="status">Ready.</div><div class="label">Duplicate checks</div><div class="progress"><div class="fill"></div></div><div class="meta progress-text"></div><div class="grid controls"><button class="btn primary run" data-icon="play">Run All Checks</button><button class="btn" data-search="banner">Banner</button><button class="btn" data-search="bannerState">Banner + State</button><button class="btn" data-search="address">Address</button><button class="btn" data-search="phone">Phone</button><button class="btn" data-search="store">Store</button><button class="btn retry" data-icon="refresh">Retry Incomplete</button><button class="btn pause" data-icon="pause">Pause</button><button class="btn cancel" data-icon="square">Cancel</button></div><div class="label">Store tools</div><div class="grid"><button class="btn google-search" data-icon="search">Google Search</button><button class="btn google-banner-state" data-icon="search">Google Banner + State</button><button class="btn google-banner-city" data-icon="search">Google Banner + City</button><button class="btn address-search" data-icon="search">Google Address Search</button><button class="btn map-search" data-icon="map">Map Address Search</button><button class="btn copy-store" data-icon="copy">Copy Store Data</button></div><div class="label">Results</div><div class="results"></div></div>
           <div class="actions"><button class="btn danger kill" data-icon="power">Kill Bot</button></div>
         </section>
       </div>`;
@@ -1092,7 +1108,11 @@
     };
     const position = () => {
       const rect = $('.bot').getBoundingClientRect();
-      shell.classList.toggle('status-right', rect.left < 240);
+      shell.style.setProperty('--toolbar-offset','0px');
+      const toolbarRect = $('.quick-searches').getBoundingClientRect();
+      const toolbarOffset = toolbarRect.left < 6 ? 6 - toolbarRect.left : toolbarRect.right > window.innerWidth - 6 ? window.innerWidth - 6 - toolbarRect.right : 0;
+      shell.style.setProperty('--toolbar-offset',`${toolbarOffset}px`);
+      shell.classList.toggle('status-right', rect.left < 310);
       if (!open) return;
       const placement = Layout.computePanelPlacement(rect, { width: 430, height: Math.min(680, panel.scrollHeight || 680) }, { width: window.innerWidth, height: window.innerHeight });
       Object.assign(panel.style, { left: `${placement.left}px`, top: `${placement.top}px`, width: `${placement.width}px`, maxHeight: `${placement.maxHeight}px` });
@@ -1111,14 +1131,20 @@
       const googleQuery = [source.bannerName, source.address, source.city, source.state, source.zip].filter(Boolean).join(' ');
       $('.fill').style.width = total ? `${Math.min(100, progress / total * 100)}%` : '0%';
       $('.progress-text').textContent = state.activeQuery ? `${progress}/${total} — ${state.activeQuery.label}` : `${progress}/${total} — ${state.status || 'ready'}`;
-      const busy=['running','waiting','paused'].includes(state.status); $('.run').disabled=busy||!source.bannerName; $('.google-search').disabled=!googleQuery; $('.retry').disabled=busy||state.status!=='incomplete'; $('.pause').disabled=!busy; setButtonLabel($('.pause'),state.status==='paused'?'Resume':'Pause'); $('.cancel').disabled=!busy;
+      const busy=['running','waiting','paused'].includes(state.status); $('.run').disabled=busy||!source.bannerName; $('.google-search').disabled=!googleQuery; $('.retry').disabled=busy||state.status!=='incomplete'; $('.pause').disabled=!busy; setButtonLabel($('.pause'),state.status==='paused'?'Continue':'Pause'); $('.cancel').disabled=!busy;
       const progressLabel = root.PickerBookmarkProgress.describeProgress(state);
       $('.bot-progress').textContent = progressLabel;
       $('.bot-status').hidden = open || state.status === 'ready';
       $('.quick-stop').hidden = !busy;
-      $('.notice').textContent=state.diagnostic || (state.status === 'ready' ? 'Ready.' : state.status === 'completed' ? 'Checks complete.' : 'Checking current record.');
+      $('.quick-pause').hidden = !busy;
+      $('.quick-pause').textContent = state.status === 'paused' ? 'Continue' : 'Pause';
+      $('.quick-pause').setAttribute('aria-label', state.status === 'paused' ? 'Continue searches' : 'Pause searches');
+      $('.quick-pause').title = state.status === 'paused' ? 'Continue remaining searches' : 'Pause after the current search finishes';
+      $('.google-banner-state').disabled = !source.bannerName || !source.state;
+      $('.google-banner-city').disabled = !source.bannerName || !source.city;
+      $('.notice').textContent=state.diagnostic || (state.status === 'ready' ? 'Ready.' : state.status === 'completed' ? 'Checks complete.' : state.status === 'paused' ? 'Paused. The current search may finish; Continue resumes the remaining checks.' : 'Checking current record.');
       const availablePlan = state.source ? Engine.createSearchPlan(state.source) : [];
-      const queryGroups = {banner:['banner-exact-zip','banner-wildcard-zip'],address:['address-city','address-zip'],phone:['phone'],store:['store-banner']};
+      const queryGroups = {banner:['banner-exact-zip','banner-wildcard-zip'],bannerState:['banner-state'],address:['address-city','address-zip'],phone:['phone'],store:['store-banner']};
       shadow.querySelectorAll('[data-search]').forEach(button => { const group=button.dataset.search; button.disabled=busy || !availablePlan.some(query => group==='all' || queryGroups[group]?.includes(query.type)); });
       const manualRequired = !state.source && !!state.diagnostic;
       $('.notice').dataset.tone = manualRequired ? 'warning' : 'info';
@@ -1153,16 +1179,28 @@
       if (immediate || reducedMotion) finishKill();
       else killTimer = window.setTimeout(finishKill, 1700);
     }
+    lifecycle.listen(document, 'pointerdown', event => {
+      if (open && !event.composedPath().includes(host)) closePanel();
+    }, {capture:true});
+    lifecycle.listen(document, 'keydown', event => { if(event.key === 'Escape' && open) closePanel(); });
     lifecycle.listen(shadow, 'click', event => {
       const target=event.target.closest('button'); if(!target)return;
       if(target.classList.contains('bot')) { if(suppressClick){suppressClick=false;return;} animateRobot('waving',1200); return open?closePanel():openPanel(); }
       if(target.classList.contains('close')) return closePanel();
       if(target.classList.contains('quick-stop')) { controller.cancel(); return; }
       if(target.dataset.search || target.classList.contains('run') || target.classList.contains('retry')) { closePanel(); return controller.run(target.dataset.search || 'all').catch(error=>{ $('.notice').textContent=error.message; $('.bot').title=error.message; }); }
-      if(target.classList.contains('pause')) return state.status==='paused'?controller.resume():controller.pause();
+      if(target.classList.contains('pause') || target.classList.contains('quick-pause')) return state.status==='paused'?controller.resume():controller.pause();
       if(target.classList.contains('cancel')) return controller.cancel();
       if(target.classList.contains('kill')) return kill();
       if(target.dataset.copy) return copy(state.source?.[target.dataset.copy]);
+      if(target.classList.contains('google-banner-state') || target.classList.contains('google-banner-city')) {
+        const source=state.source||{};
+        const location=target.classList.contains('google-banner-state')?source.state:source.city;
+        if(!source.bannerName || !location)return;
+        const query=[source.bannerName,location].join(' ');
+        if(!controller.openExternal(`https://www.google.com/search?q=${encodeURIComponent(query)}`)) $('.notice').textContent='Allow popups to open Google Search.';
+        return;
+      }
       if(target.classList.contains('google-search')) { const source=state.source||{}; const query=[source.bannerName,source.address,source.city,source.state,source.zip].filter(Boolean).join(' '); if (!query) return; if(!controller.openExternal(`https://www.google.com/search?q=${encodeURIComponent(query)}`)) $('.notice').textContent='Allow popups to open Google Search.'; return; }
       if(target.classList.contains('copy-store')) return copy([`Banner: ${state.source?.bannerName||''}`,`Store #: ${state.source?.storeNumber||''}`,`Address: ${address()}`,`Phone: ${state.source?.phone||''}`].join('\n'));
       if(target.classList.contains('address-search')) { if(!controller.openExternal(`https://www.google.com/search?q=${encodeURIComponent(address())}`)) $('.notice').textContent='Allow popups to open the address search.'; return; }

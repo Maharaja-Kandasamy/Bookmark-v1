@@ -7,7 +7,7 @@
     if(state.status === 'paused')return 'Paused';
     if(state.activeQuery?.type === 'links')return `Reviewing links for the top ${(state.tdIds || []).length} matches...`;
     const type=state.activeQuery?.type || '';
-    const name=type.startsWith('address')?'address':type.startsWith('banner')?'business name':type==='phone'?'phone':type==='store-banner'?'store number':'records';
+    const name=type==='banner-state'?'business name + state':type.startsWith('address')?'address':type.startsWith('banner')?'business name':type==='phone'?'phone':type==='store-banner'?'store number':'records';
     if(['running','waiting'].includes(state.status))return state.activeQuery ? `Searching ${name} · ${state.progress || 0} of ${state.total || 0}` : 'Starting searches...';
     return 'Ready';
   }

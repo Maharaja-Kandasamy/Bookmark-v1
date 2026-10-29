@@ -13,9 +13,14 @@
     let destroyed = false;
     let revision = 0;
     let completionAborter = null;
+    let paused = false;
+    let continueResolve = null;
+    const waitForContinue = () => paused ? new Promise(resolve => { continueResolve = resolve; }) : Promise.resolve();
+    function clearPause() { paused = false; continueResolve?.(); continueResolve = null; }
     const signature = found => JSON.stringify([found?.profile, found?.source || null]);
     function invalidate() {
       revision++;
+      clearPause();
       completionAborter?.abort();
       runner?.cancel?.();
       runner = null;
@@ -65,7 +70,7 @@
       const runRevision = revision;
       const current = store.get();
       if (!current?.source) return { status: 'error', observations: [], diagnostic: current?.diagnostic || 'Source table not found' };
-      const groups = { banner: ['banner-exact-zip','banner-wildcard-zip'], address: ['address-city','address-zip'], phone: ['phone'], store: ['store-banner'] };
+      const groups = { banner: ['banner-exact-zip','banner-wildcard-zip'], bannerState: ['banner-state'], address: ['address-city','address-zip'], phone: ['phone'], store: ['store-banner'] };
       const plan = Engine.createSearchPlan(current.source).filter(query => group === 'all' || groups[group]?.includes(query.type));
       if (!plan.length) {
         const result = { status: 'incomplete', observations: [], progress: 0, total: 0, diagnostic: 'Not enough source data to create searches' };
@@ -92,8 +97,9 @@
         completionAborter = aborter;
         store.set({status:'waiting',results,tdIds,activeQuery:{type:'links',label:`Reviewing links for the top ${tdIds.length} matches...`},progress:plan.length,total:plan.length+1});
         try {
-          linksSearch = await root.PickerBookmarkLinks.execute(tdIds,{profile:current.profile,signal:aborter.signal,timeoutMs:30000,stableMs:1500,
+          linksSearch = await root.PickerBookmarkLinks.execute(tdIds,{profile:current.profile,signal:aborter.signal,timeoutMs:30000,stableMs:1500,beforeSubmit:waitForContinue,
             isCurrent:() => { refresh(); return !destroyed && revision === runRevision; }});
+          await waitForContinue();
         } finally { if(completionAborter === aborter)completionAborter = null; }
         if (aborter.signal.aborted && linksSearch) linksSearch = {...linksSearch,status:'cancelled'};
         refresh();
@@ -108,15 +114,16 @@
       return result;
     }
 
-    function cancel() { runner?.cancel?.(); completionAborter?.abort(); }
-    function pause() { runner?.pause?.(); }
-    function resume() { runner?.resume?.(); }
+    function cancel() { clearPause(); runner?.cancel?.(); completionAborter?.abort(); }
+    function pause() { if (!runner?.isActive?.() && !completionAborter) return; paused = true; runner?.pause?.(); store.set({status:'paused'}); }
+    function resume() { if (!paused) return; clearPause(); runner?.resume?.(); store.set({status:completionAborter?'waiting':'running'}); }
     function openExternal(url) {
       try { return !!win.open(url, '_blank', 'noopener,noreferrer'); } catch { return false; }
     }
     function destroy() {
       if (destroyed) return;
       destroyed = true;
+      clearPause();
       completionAborter?.abort();
       runner?.cancel?.();
       runner = null;

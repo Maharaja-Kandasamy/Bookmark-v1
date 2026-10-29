@@ -62,6 +62,8 @@
         .filter(el => !el.disabled && ['search','searchlinks','linkssearch'].includes(norm(el.getAttribute('aria-label') || el.textContent || el.value)));
       if (searches.length !== 1) return {status:'incomplete',diagnostic:searches.length?'Multiple Search buttons found in Links search':'Links Search button not found',value};
       if (!current()) return {status:'incomplete',diagnostic:'Links search cancelled or source changed',value};
+      await options.beforeSubmit?.();
+      if (!current()) return {status:'incomplete',diagnostic:'Links search cancelled or source changed',value};
       const result = await Adapter.submitAndWait(dialog,searches[0],options);
       return {...result,value,tdIds:[...ids]};
     } catch (error) {

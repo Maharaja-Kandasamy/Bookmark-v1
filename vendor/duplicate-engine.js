@@ -148,6 +148,7 @@
     const bannerNeedsWildcard = /[0-9]|[^a-z0-9\s]|\band\b/i.test(source.bannerName);
     const candidates = [
       !bannerNeedsWildcard && bannerWildcard && source.zip3 && { type: 'banner-exact-zip', label: 'Exact banner + ZIP3', fields: { banner: bannerSearchWords(source.bannerName).join(' '), zip: source.zip3 } },
+      bannerWildcard && cleanText(source.state) && { type: 'banner-state', label: 'Wildcard banner + state', fields: { banner: bannerWildcard, state: cleanText(source.state) } },
       bannerWildcard && source.zip3 && { type: 'banner-wildcard-zip', label: 'Wildcard banner + ZIP3', fields: { banner: bannerWildcard, zip: source.zip3 } },
       addressWildcard && source.city && { type: 'address-city', label: 'Wildcard address + city', fields: { address: addressWildcard, city: source.city } },
       addressWildcard && source.zip3 && { type: 'address-zip', label: 'Wildcard address + ZIP3', fields: { address: addressWildcard, zip: source.zip3 } },
