@@ -75,17 +75,66 @@
     input.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
+  function captureSearchFields(dialog, profile = 'storeView') {
+    const fields = [], seenInputs = new Set(), seenCheckboxes = new Set();
+    const add = (input, checkbox) => {
+      if (seenInputs.has(input)) input = null;
+      if (seenCheckboxes.has(checkbox)) checkbox = null;
+      if (!input && !checkbox) return;
+      if (input) seenInputs.add(input);
+      if (checkbox) seenCheckboxes.add(checkbox);
+      fields.push({input,checkbox,value:input?.value,checked:checkbox?.checked});
+    };
+    // Include every search-filter row, including filters unknown to the query planner.
+    // Result-selection checkboxes have no search text field and are excluded.
+    for (const input of dialog.querySelectorAll('input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="submit"]):not([type="button"]),textarea')) {
+      if (input.closest('table,[data-testid="manual-match-search-table"],[data-testid="manual-match-table"]')) continue;
+      const group = input.closest('.horizontalPanelMM,.form-group,[role="group"],.MuiGrid-container');
+      if (!group) continue;
+      const checkboxes = [...group.querySelectorAll('input[type="checkbox"]')];
+      if (!checkboxes.length) continue;
+      add(input,checkboxes.length === 1 ? checkboxes[0] : null);
+      checkboxes.forEach(checkbox => add(null,checkbox));
+    }
+    for (const key of Object.keys(FIELD_CONTROLS)) {
+      const {input,checkbox} = discoverControl(dialog,key,profile);
+      add(input,checkbox);
+    }
+    return fields;
+  }
+
+  function clearSearchFilters(snapshot) {
+    if (!snapshot || findDialog() !== snapshot.dialog) return {ok:false,diagnostic:'Manual Match dialog changed'};
+    try {
+      for (const {checkbox} of snapshot.fields) {
+        if (!checkbox?.checked) continue;
+        if (checkbox.disabled) return {ok:false,diagnostic:'A selected search filter is disabled and could not be unchecked'};
+        checkbox.click();
+        if (checkbox.checked) return {ok:false,diagnostic:'A previous search filter could not be unchecked'};
+      }
+      if (snapshot.fields.some(({checkbox}) => checkbox?.checked)) return {ok:false,diagnostic:'A previous search filter was reselected by the form'};
+      return {ok:true};
+    } finally {
+      // Unchecking a filter can clear its value; restore values before preparing the new query.
+      snapshot.fields.forEach(({input,value}) => {if (input?.isConnected && input.value !== value) setInputValue(input,value);});
+    }
+  }
+
+  function findSearchButton(dialog) {
+    const visible = element => !!element.getClientRects().length && !element.closest('[hidden],[aria-hidden="true"]') && getComputedStyle(element).visibility !== 'hidden';
+    const candidates = [...dialog.querySelectorAll('button,input[type="submit"],[role="button"]')].filter(visible)
+      .filter(element => !element.disabled && /^search$/i.test(String(element.textContent || element.value || element.getAttribute('aria-label') || '').trim()));
+    const standard = candidates.filter(element => element.getAttribute('data-testid') === 'search-button');
+    const matches = standard.length ? standard : candidates;
+    return matches.length === 1 ? {button:matches[0]} : {error:matches.length?'Multiple Search buttons found':'Visible Search button not found'};
+  }
+
   function prepareQuery(query, options = {}) {
     const dialog = findDialog();
     if (!dialog) return { ok: false, diagnostic: 'Manual Match dialog not open' };
     const profile = options.profile === 'retailSync' ? 'retailSync' : 'storeView';
-    const existingFields = Object.keys(FIELD_CONTROLS).map(key => {
-      const found = discoverControl(dialog, key, profile);
-      return { ...found, value: found.input?.value };
-    });
-    existingFields.forEach(({ checkbox }) => { if (checkbox?.checked) checkbox.click(); });
-    // Some forms clear values when unchecked. Preserve those values while changing search selection.
-    existingFields.forEach(({ input, value }) => { if (input && input.value !== value) setInputValue(input, value); });
+    const cleared = clearSearchFilters({dialog,fields:captureSearchFields(dialog,profile)});
+    if (!cleared.ok) return cleared;
     for (const control of controlsForQuery(query, profile)) {
       const found = discoverControl(dialog, control.key, profile);
       const { checkbox, input } = found;
@@ -122,8 +171,9 @@
     const prepared = prepareQuery(query, { profile:options.profile });
     if (!prepared.ok) return { status: 'incomplete', rows: [], diagnostic: prepared.diagnostic };
     const dialog = prepared.dialog;
-    const search = evaluate(".//button[@data-testid='search-button'][.//span[normalize-space()='Search']]", dialog);
-    if (!search) return { status: 'incomplete', rows: [], diagnostic: 'Visible Search button not found' };
+    const foundSearch = findSearchButton(dialog);
+    if (foundSearch.error) return { status: 'incomplete', rows: [], diagnostic: foundSearch.error };
+    const search = foundSearch.button;
     if (query.__pickerSubmitted) return { status:'incomplete', rows:[], diagnostic:'Search was already submitted for this query' };
     query.__pickerSubmitted = true;
     return submitAndWait(dialog, search, options);
@@ -175,10 +225,7 @@
     if (!dialog) return null;
     const source = Gsrs?.extractFromDocument(document, profile);
     const identity = source?.source ? Gsrs.sourceSignature(source) : null;
-    const fields = Object.keys(FIELD_CONTROLS).map(key => {
-      const { input, checkbox } = discoverControl(dialog, key, profile);
-      return { input, checkbox, value: input?.value, checked: checkbox?.checked };
-    });
+    const fields = captureSearchFields(dialog,profile);
     return { dialog, fields, identity, profile };
   }
   function restoreFields(snapshot) {
@@ -201,5 +248,5 @@
     finally { restoreFields(snapshot); }
   }
 
-  return { FIELD_CONTROLS, PROFILE_CONTROLS, controlsForQuery, rowFromCells, findDialog, controlMatchesField, discoverControl, prepareQuery, extractRows, resultObservationRoot, isResultActivity, submitAndWait, setInputValue, captureFields, restoreFields, execute };
+  return { FIELD_CONTROLS, PROFILE_CONTROLS, controlsForQuery, rowFromCells, findDialog, controlMatchesField, discoverControl, prepareQuery, captureSearchFields, clearSearchFilters, findSearchButton, extractRows, resultObservationRoot, isResultActivity, submitAndWait, setInputValue, captureFields, restoreFields, execute };
 });

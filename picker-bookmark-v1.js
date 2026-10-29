@@ -489,10 +489,36 @@
     const area=String(row.areaCode||'').replace(/\D/g,'');const phone=String(row.phone||'').replace(/\D/g,'');
     if(area||phone)row.phone=phone.startsWith(area)&&area?phone:`${area}${phone}`;delete row.areaCode;
     const allAliases=new Set(Object.values(normalizedProfiles[profile]||{}).flat());const useful=new Set(names.map((name,index)=>allAliases.has(name)?index:-1).filter(index=>index>=0));row.copyFields=headers.map((header,index)=>({header:clean(header),value:clean(cells[index]),index})).filter(x=>useful.has(x.index)&&x.header&&x.value).map(({header,value})=>({header,value}));return row;}
-  function modelFromTable(table){if(Array.isArray(table?.headers)&&Array.isArray(table?.rows))return table;const headers=[...table.querySelectorAll('thead th')].map(cell=>clean(cell.getAttribute('title')||cell.querySelector('[title]')?.getAttribute('title')||cell.textContent));const rows=[...table.querySelectorAll('tbody tr')].filter(row=>row.querySelector('td')).map(row=>[...row.querySelectorAll('td')].map(cell=>clean(cell.textContent)));return{headers,rows};}
-  function modelFromConfiguredXpaths(root){const doc=root?.ownerDocument||root;if(!doc?.evaluate)return null;const XR=doc.defaultView?.XPathResult||globalThis.XPathResult;if(!XR)return null;const first=xpath=>doc.evaluate(xpath,doc,null,XR.FIRST_ORDERED_NODE_TYPE,null).singleNodeValue;const table=first(TABLE_XPATH);const header=first(HEADER_XPATH);const client=first(CLIENT_ROW_XPATH);if(!table||!header||!client)return null;const headers=[...header.querySelectorAll('th')].map(cell=>clean(cell.getAttribute('title')||cell.querySelector('[title]')?.getAttribute('title')||cell.textContent));const rowCells=row=>[...row.querySelectorAll('td')].map(cell=>clean(cell.textContent));const result=doc.evaluate(CANDIDATE_ROWS_XPATH,doc,null,XR.ORDERED_NODE_SNAPSHOT_TYPE,null);const candidates=[];for(let i=0;i<result.snapshotLength;i++)candidates.push(rowCells(result.snapshotItem(i)));return{headers,rows:[rowCells(client),...candidates]};}
+  function modelFromTable(table){
+    if(Array.isArray(table?.headers)&&Array.isArray(table?.rows))return table;
+    const headers=[...table.querySelectorAll('thead th')].map(cell=>clean(cell.getAttribute('title')||cell.querySelector('[title]')?.getAttribute('title')||cell.textContent));
+    const elements=[...table.querySelectorAll('tbody tr')].filter(row=>row.querySelector('td'));
+    const rows=elements.map(row=>[...row.querySelectorAll('td')].map(cell=>clean(cell.textContent)));
+    const selectedIndexes=elements.map((row,index)=>row.matches('.Mui-selected,.selected,.highlighted,[aria-selected="true"],[data-selected="true"]')?index:-1).filter(index=>index>=0);
+    return{headers,rows,selectedIndexes};
+  }
+  function modelFromConfiguredXpaths(root){const doc=root?.ownerDocument||root;if(!doc?.evaluate)return null;const XR=doc.defaultView?.XPathResult||globalThis.XPathResult;if(!XR)return null;const first=xpath=>doc.evaluate(xpath,doc,null,XR.FIRST_ORDERED_NODE_TYPE,null).singleNodeValue;const table=first(TABLE_XPATH);const header=first(HEADER_XPATH);const client=first(CLIENT_ROW_XPATH);if(!table||!header||!client||table.closest?.('[data-testid="manual-match-search-table"]'))return null;const headers=[...header.querySelectorAll('th')].map(cell=>clean(cell.getAttribute('title')||cell.querySelector('[title]')?.getAttribute('title')||cell.textContent));const rowCells=row=>[...row.querySelectorAll('td')].map(cell=>clean(cell.textContent));const result=doc.evaluate(CANDIDATE_ROWS_XPATH,doc,null,XR.ORDERED_NODE_SNAPSHOT_TYPE,null);const candidates=[];for(let i=0;i<result.snapshotLength;i++)candidates.push(rowCells(result.snapshotItem(i)));return{headers,rows:[rowCells(client),...candidates]};}
   function extractSourceAndCandidates(table,requestedProfile){const model=modelFromTable(table);if(!model.headers.length)return{error:'source-headers-not-found'};const detected=detectProfile(model.headers);const effective=requestedProfile==='custom'?'storeView':requestedProfile||detected;if(detected==='unknown'||detected==='ambiguous')return{error:`profile-${detected}`};if(effective!==detected)return{error:'profile-mismatch',detectedProfile:detected,requestedProfile};if(!model.rows.length)return{error:'source-row-not-found'};const rows=model.rows.map(cells=>extractRow(model.headers,cells,detected));return{profile:detected,headers:model.headers,source:rows[0],candidates:rows.slice(1),sourceRowCount:model.rows.length,initialCandidateCount:Math.max(0,model.rows.length-1)};}
-  function extractFromDocument(root,requestedProfile){const configured=modelFromConfiguredXpaths(root);if(configured)return extractSourceAndCandidates(configured,requestedProfile);const scoped=findScopedTable(root,'source');if(scoped.error)return scoped;return extractSourceAndCandidates(scoped.table,requestedProfile);}
+  function extractFromDocument(root,requestedProfile){
+    const scoped=findScopedTable(root,'source');
+    if(scoped.table){
+      const model=modelFromTable(scoped.table);
+      if(model.selectedIndexes?.length>1)return{error:'multiple-highlighted-rows'};
+      if(model.selectedIndexes?.length===1){
+        const source=extractSourceAndCandidates({headers:model.headers,rows:[model.rows[model.selectedIndexes[0]]]},requestedProfile);
+        if(source.error)return source;
+        const results=findScopedTable(root,'results');
+        const candidates=[];
+        if(results.table){const resultModel=modelFromTable(results.table),profile=detectProfile(resultModel.headers);if(normalizedProfiles[profile])for(const cells of resultModel.rows)candidates.push(extractRow(resultModel.headers,cells,profile));}
+        return{...source,candidates,sourceRowCount:model.rows.length,initialCandidateCount:candidates.length};
+      }
+      return extractSourceAndCandidates(scoped.table,requestedProfile);
+    }
+    if(scoped.error==='multiple-source-tables')return scoped;
+    const configured=modelFromConfiguredXpaths(root);
+    if(configured)return extractSourceAndCandidates(configured,requestedProfile);
+    return scoped;
+  }
   function mergeCustomExtraction(extraction,overrides){const source={...(extraction?.source||{})};for(const [key,value] of Object.entries(overrides||{})){if(String(value||'').trim())source[key]=value;}return{...extraction,source};}
   const sourceSignature=extraction=>JSON.stringify([extraction?.profile,extraction?.source?.slId,extraction?.source?.bannerName,extraction?.source?.storeNumber,extraction?.source?.address,extraction?.source?.zip]);
   return{SOURCE_XPATH,RESULTS_XPATH,TABLE_XPATH,HEADER_XPATH,CLIENT_ROW_XPATH,CANDIDATE_ROWS_XPATH,SELECTORS,PROFILE_HEADERS,PROFILE_COLUMN_INDEXES,detectProfile,buildProfileHeaderMap,hasStableLayout,findScopedTable,extractRow,extractSourceAndCandidates,extractFromDocument,mergeCustomExtraction,sourceSignature};
@@ -574,17 +600,66 @@
     input.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
+  function captureSearchFields(dialog, profile = 'storeView') {
+    const fields = [], seenInputs = new Set(), seenCheckboxes = new Set();
+    const add = (input, checkbox) => {
+      if (seenInputs.has(input)) input = null;
+      if (seenCheckboxes.has(checkbox)) checkbox = null;
+      if (!input && !checkbox) return;
+      if (input) seenInputs.add(input);
+      if (checkbox) seenCheckboxes.add(checkbox);
+      fields.push({input,checkbox,value:input?.value,checked:checkbox?.checked});
+    };
+    // Include every search-filter row, including filters unknown to the query planner.
+    // Result-selection checkboxes have no search text field and are excluded.
+    for (const input of dialog.querySelectorAll('input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="submit"]):not([type="button"]),textarea')) {
+      if (input.closest('table,[data-testid="manual-match-search-table"],[data-testid="manual-match-table"]')) continue;
+      const group = input.closest('.horizontalPanelMM,.form-group,[role="group"],.MuiGrid-container');
+      if (!group) continue;
+      const checkboxes = [...group.querySelectorAll('input[type="checkbox"]')];
+      if (!checkboxes.length) continue;
+      add(input,checkboxes.length === 1 ? checkboxes[0] : null);
+      checkboxes.forEach(checkbox => add(null,checkbox));
+    }
+    for (const key of Object.keys(FIELD_CONTROLS)) {
+      const {input,checkbox} = discoverControl(dialog,key,profile);
+      add(input,checkbox);
+    }
+    return fields;
+  }
+
+  function clearSearchFilters(snapshot) {
+    if (!snapshot || findDialog() !== snapshot.dialog) return {ok:false,diagnostic:'Manual Match dialog changed'};
+    try {
+      for (const {checkbox} of snapshot.fields) {
+        if (!checkbox?.checked) continue;
+        if (checkbox.disabled) return {ok:false,diagnostic:'A selected search filter is disabled and could not be unchecked'};
+        checkbox.click();
+        if (checkbox.checked) return {ok:false,diagnostic:'A previous search filter could not be unchecked'};
+      }
+      if (snapshot.fields.some(({checkbox}) => checkbox?.checked)) return {ok:false,diagnostic:'A previous search filter was reselected by the form'};
+      return {ok:true};
+    } finally {
+      // Unchecking a filter can clear its value; restore values before preparing the new query.
+      snapshot.fields.forEach(({input,value}) => {if (input?.isConnected && input.value !== value) setInputValue(input,value);});
+    }
+  }
+
+  function findSearchButton(dialog) {
+    const visible = element => !!element.getClientRects().length && !element.closest('[hidden],[aria-hidden="true"]') && getComputedStyle(element).visibility !== 'hidden';
+    const candidates = [...dialog.querySelectorAll('button,input[type="submit"],[role="button"]')].filter(visible)
+      .filter(element => !element.disabled && /^search$/i.test(String(element.textContent || element.value || element.getAttribute('aria-label') || '').trim()));
+    const standard = candidates.filter(element => element.getAttribute('data-testid') === 'search-button');
+    const matches = standard.length ? standard : candidates;
+    return matches.length === 1 ? {button:matches[0]} : {error:matches.length?'Multiple Search buttons found':'Visible Search button not found'};
+  }
+
   function prepareQuery(query, options = {}) {
     const dialog = findDialog();
     if (!dialog) return { ok: false, diagnostic: 'Manual Match dialog not open' };
     const profile = options.profile === 'retailSync' ? 'retailSync' : 'storeView';
-    const existingFields = Object.keys(FIELD_CONTROLS).map(key => {
-      const found = discoverControl(dialog, key, profile);
-      return { ...found, value: found.input?.value };
-    });
-    existingFields.forEach(({ checkbox }) => { if (checkbox?.checked) checkbox.click(); });
-    // Some forms clear values when unchecked. Preserve those values while changing search selection.
-    existingFields.forEach(({ input, value }) => { if (input && input.value !== value) setInputValue(input, value); });
+    const cleared = clearSearchFilters({dialog,fields:captureSearchFields(dialog,profile)});
+    if (!cleared.ok) return cleared;
     for (const control of controlsForQuery(query, profile)) {
       const found = discoverControl(dialog, control.key, profile);
       const { checkbox, input } = found;
@@ -621,8 +696,9 @@
     const prepared = prepareQuery(query, { profile:options.profile });
     if (!prepared.ok) return { status: 'incomplete', rows: [], diagnostic: prepared.diagnostic };
     const dialog = prepared.dialog;
-    const search = evaluate(".//button[@data-testid='search-button'][.//span[normalize-space()='Search']]", dialog);
-    if (!search) return { status: 'incomplete', rows: [], diagnostic: 'Visible Search button not found' };
+    const foundSearch = findSearchButton(dialog);
+    if (foundSearch.error) return { status: 'incomplete', rows: [], diagnostic: foundSearch.error };
+    const search = foundSearch.button;
     if (query.__pickerSubmitted) return { status:'incomplete', rows:[], diagnostic:'Search was already submitted for this query' };
     query.__pickerSubmitted = true;
     return submitAndWait(dialog, search, options);
@@ -674,10 +750,7 @@
     if (!dialog) return null;
     const source = Gsrs?.extractFromDocument(document, profile);
     const identity = source?.source ? Gsrs.sourceSignature(source) : null;
-    const fields = Object.keys(FIELD_CONTROLS).map(key => {
-      const { input, checkbox } = discoverControl(dialog, key, profile);
-      return { input, checkbox, value: input?.value, checked: checkbox?.checked };
-    });
+    const fields = captureSearchFields(dialog,profile);
     return { dialog, fields, identity, profile };
   }
   function restoreFields(snapshot) {
@@ -700,7 +773,7 @@
     finally { restoreFields(snapshot); }
   }
 
-  return { FIELD_CONTROLS, PROFILE_CONTROLS, controlsForQuery, rowFromCells, findDialog, controlMatchesField, discoverControl, prepareQuery, extractRows, resultObservationRoot, isResultActivity, submitAndWait, setInputValue, captureFields, restoreFields, execute };
+  return { FIELD_CONTROLS, PROFILE_CONTROLS, controlsForQuery, rowFromCells, findDialog, controlMatchesField, discoverControl, prepareQuery, captureSearchFields, clearSearchFilters, findSearchButton, extractRows, resultObservationRoot, isResultActivity, submitAndWait, setInputValue, captureFields, restoreFields, execute };
 });
 (function(root,factory){const api=factory();if(typeof module==='object'&&module.exports)module.exports=api;if(root)root.PickerBotLayout=api;})(typeof globalThis!=='undefined'?globalThis:this,function(){
   const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
@@ -797,84 +870,63 @@
 (function(root) {
   const norm = value => String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
   const visible = element => !!element?.getClientRects().length && !element.closest('[hidden],[aria-hidden="true"]');
+  const fieldSelector = 'input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]),textarea';
+  function fieldGroup(input) {
+    return input.closest('.horizontalPanelMM,.form-group,[role="group"],.MuiGrid-container') || input.parentElement;
+  }
   function labels(element) {
     const doc = element.ownerDocument;
+    const group = fieldGroup(element);
+    // GSRS repeats each ID on the checkbox and text input, so input.labels can be empty.
+    const nearby = group && group.querySelectorAll(fieldSelector).length === 1
+      ? [...group.querySelectorAll('label,[title],.MuiFormLabel-root')].map(label => label.getAttribute('title') || label.textContent) : [];
     return [element.getAttribute('aria-label'), element.getAttribute('placeholder'), element.getAttribute('name'), element.getAttribute('id'),
-      ...(element.labels ? [...element.labels].map(label => label.textContent) : []),
+      ...(element.labels ? [...element.labels].map(label => label.textContent) : []), ...nearby,
       ...(element.getAttribute('aria-labelledby') || '').split(/\s+/).map(id => doc.getElementById(id)?.textContent)
     ].filter(Boolean).map(norm);
   }
   function findTdField(dialog) {
-    const aliases = ['tdlinxstorecode','td','tds','tdlinxnumber','tdlinxnumbers','tdid','tdids','tdnumber','tdnumbers','tdlinx','tdlinxid','tdlinxids','slid','slids','linkstd','tdlinks'];
-    const matches = [...dialog.querySelectorAll('input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]),textarea')]
-      .filter(visible).filter(input => labels(input).some(label => aliases.includes(label.replace(/(?:textfield|input)$/,''))));
-    if (matches.length !== 1) return { error: matches.length ? 'Multiple TD fields found in Links search' : 'TD field not found in Links search' };
-    const input = matches[0];
-    const group = input.closest('.horizontalPanelMM,.form-group,[role="group"],.MuiGrid-container') || input.parentElement;
-    const checkboxes = [...group.querySelectorAll('input[type="checkbox"]')].filter(visible);
-    return { input, checkbox: checkboxes.length === 1 ? checkboxes[0] : null };
-  }
-  function findLinksControl(dialog) {
-    const matches = [...dialog.querySelectorAll('button,a,[role="tab"],[role="radio"],input[type="checkbox"],input[type="radio"]')].filter(visible)
-      .filter(el => [...labels(el), norm(el.textContent)].some(value => ['links','linksearch','linkssearch'].includes(value)));
-    return matches.length === 1 ? { control: matches[0] } : { error: matches.length ? 'Multiple Links controls found' : 'Links control not found' };
+    const aliases = ['tdlinxstorecode','td','tds','tdlinxnumber','tdlinxnumbers','tdid','tdids','tdnumber','tdnumbers','tdlinx','tdlinxid','tdlinxids','linkstd','tdlinks'];
+    const candidates = [...dialog.querySelectorAll(fieldSelector)].filter(visible).map(input => ({input,labels:labels(input).map(label => label.replace(/(?:textfield|input)$/,''))}));
+    const exact = candidates.filter(item => item.labels.includes('tdlinxstorecode'));
+    const matches = exact.length ? exact : candidates.filter(item => item.labels.some(label => aliases.includes(label)));
+    if (matches.length !== 1) return {error:matches.length?'Multiple TDLINX_STORE_CODE fields found':'TDLINX_STORE_CODE field not found'};
+    const input = matches[0].input;
+    const checkboxes = [...fieldGroup(input).querySelectorAll('input[type="checkbox"]')].filter(visible);
+    return {input,checkbox:checkboxes.length === 1 ? checkboxes[0] : null};
   }
   async function execute(ids, options = {}) {
     const Adapter = root.PickerManualMatchAdapter;
     const value = ids.join(',');
-    if (!ids.length || ids.length > 5 || ids.some(id => !/^\d+$/.test(id))) return { status:'incomplete',diagnostic:'No valid top TD IDs available',value };
+    if (!ids.length || ids.length > 5 || ids.some(id => !/^\d+$/.test(id))) return {status:'incomplete',diagnostic:'No valid top TD IDs available',value};
     const dialog = Adapter.findDialog();
-    if (!dialog) return { status:'incomplete',diagnostic:'Manual Match dialog not open for Links search',value };
+    if (!dialog) return {status:'incomplete',diagnostic:'Manual Match dialog not open for ranked TD search',value};
     const snapshot = Adapter.captureFields(options.profile);
-    let mode = null, modeChecked, field = null, previousValue, previousChecked;
-    const priorTd = findTdField(dialog);
-    const priorTdValue = priorTd.input?.value;
-    const priorTdChecked = priorTd.checkbox?.checked;
     const current = () => !options.signal?.aborted && (!options.isCurrent || options.isCurrent()) && Adapter.findDialog() === dialog;
     try {
-      const foundMode = findLinksControl(dialog);
-      if (foundMode.error) return { status:'incomplete',diagnostic:foundMode.error,value };
-      mode = foundMode.control;
-      modeChecked = typeof mode.checked === 'boolean' ? mode.checked : undefined;
-      if (!current()) return {status:'incomplete',diagnostic:'Links search cancelled',value};
-      if (modeChecked !== true && mode.getAttribute('aria-selected') !== 'true' && mode.getAttribute('aria-checked') !== 'true') mode.click();
-      const deadline = Date.now() + (options.discoveryTimeoutMs || 5000);
-      let found;
-      do {
-        if (!current()) return {status:'incomplete',diagnostic:'Links search cancelled or source changed',value};
-        found = findTdField(dialog);
-        if (found.input || /Multiple/.test(found.error)) break;
-        await new Promise(resolve => setTimeout(resolve,100));
-      } while (Date.now() < deadline);
-      if (found.error) return {status:'incomplete',diagnostic:found.error,value};
-      field = found; previousValue = field.input === priorTd.input ? priorTdValue : field.input.value; previousChecked = field.checkbox === priorTd.checkbox ? priorTdChecked : field.checkbox?.checked;
-      // Isolate the final query while retaining the user's original filter values.
-      snapshot?.fields.forEach(({checkbox}) => {if(checkbox?.checked && checkbox !== mode && checkbox !== field.checkbox)checkbox.click();});
-      snapshot?.fields.forEach(({input,value:original}) => {if(input && input !== field.input && input.value !== original)Adapter.setInputValue(input,original);});
-      if (field.checkbox && !field.checkbox.checked) field.checkbox.click();
-      Adapter.setInputValue(field.input,value);
-      if (field.input.value !== value) return {status:'incomplete',diagnostic:'TD list was not accepted by Links search',value};
-      const searches = [...dialog.querySelectorAll('button,input[type="submit"],[role="button"]')].filter(visible)
-        .filter(el => !el.disabled && ['search','searchlinks','linkssearch'].includes(norm(el.getAttribute('aria-label') || el.textContent || el.value)));
-      if (searches.length !== 1) return {status:'incomplete',diagnostic:searches.length?'Multiple Search buttons found in Links search':'Links Search button not found',value};
-      if (!current()) return {status:'incomplete',diagnostic:'Links search cancelled or source changed',value};
+      const field = findTdField(dialog);
+      if (field.error) return {status:'incomplete',diagnostic:field.error,value};
+      if (!field.checkbox || field.checkbox.disabled) return {status:'incomplete',diagnostic:'TDLINX_STORE_CODE search checkbox not available',value};
+      const search = Adapter.findSearchButton(dialog);
+      if (search.error) return {status:'incomplete',diagnostic:search.error,value};
       await options.beforeSubmit?.();
-      if (!current()) return {status:'incomplete',diagnostic:'Links search cancelled or source changed',value};
-      const result = await Adapter.submitAndWait(dialog,searches[0],options);
+      if (!current()) return {status:'incomplete',diagnostic:'Ranked TD search cancelled or source changed',value};
+      const cleared = Adapter.clearSearchFilters(snapshot);
+      if (!cleared.ok) return {status:'incomplete',diagnostic:cleared.diagnostic,value};
+      if (!field.checkbox.checked) field.checkbox.click();
+      if (!field.checkbox.checked) return {status:'incomplete',diagnostic:'TDLINX_STORE_CODE checkbox did not stay selected',value};
+      Adapter.setInputValue(field.input,value);
+      if (field.input.value !== value) return {status:'incomplete',diagnostic:'TD list was not accepted by TDLINX_STORE_CODE',value};
+      if (!current()) return {status:'incomplete',diagnostic:'Ranked TD search cancelled or source changed',value};
+      const result = await Adapter.submitAndWait(dialog,search.button,options);
       return {...result,value,tdIds:[...ids]};
     } catch (error) {
-      return {status:'incomplete',diagnostic:`Links search failed: ${error.message}`,value};
+      return {status:'incomplete',diagnostic:`Ranked TD search failed: ${error.message}`,value};
     } finally {
-      const sameSource = !snapshot?.identity || Adapter.captureFields(options.profile)?.identity === snapshot.identity;
-      if (sameSource && Adapter.findDialog() === dialog) {
-        if(field?.checkbox?.isConnected && field.checkbox.checked !== previousChecked)field.checkbox.click();
-        if(mode?.isConnected && modeChecked !== undefined && mode.checked !== modeChecked)mode.click();
-        Adapter.restoreFields(snapshot);
-        if(field?.input?.isConnected && field.input.value !== previousValue)Adapter.setInputValue(field.input,previousValue);
-      }
+      if (!options.isCurrent || options.isCurrent()) Adapter.restoreFields(snapshot);
     }
   }
-  root.PickerBookmarkLinks = { findTdField, findLinksControl, execute };
+  root.PickerBookmarkLinks = {findTdField,execute};
 })(typeof globalThis !== 'undefined' ? globalThis : this);
 (function (root) {
   function create(options) {
