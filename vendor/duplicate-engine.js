@@ -16,7 +16,7 @@
     .replace(/&/g, ' and ').replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
   function splitAddress(value) {
     const text = cleanText(value);
-    const unit = /(?:#|\b(?:suite|ste|unit|apt|apartment|room|rm|floor|fl|building|bldg)\b[.\s:#-]*)\s*([a-z0-9]+(?:-[a-z0-9]+)?)/i.exec(text);
+    const unit = /(?:#|\b(?:suite|ste|unit|apt|apartment|room|rm|floor|fl(?![.\s:#-]*(?:rout|route|rt|rte|hwy|highway|road|rd|sr|cr)[.\s-]*\d)|building|bldg)\b[.\s:#-]*)\s*([a-z0-9]+(?:-[a-z0-9]+)?)/i.exec(text);
     const base = (unit ? text.slice(0, unit.index) : text).trim();
     return { base, unitKey: unit ? normalizeWords(unit[1]) : '' };
   }
@@ -55,9 +55,26 @@
     return zip ? `${zip.slice(0, 3)}*` : '';
   }
 
+  const highwayStates = [
+    ['alabama','al'],['alaska','ak'],['arizona','az'],['arkansas','ar'],['california','ca'],
+    ['colorado','co'],['connecticut','ct'],['delaware','de'],['florida','fl'],['georgia','ga'],
+    ['hawaii','hi'],['idaho','id'],['illinois','il'],['indiana','in'],['iowa','ia'],
+    ['kansas','ks'],['kentucky','ky'],['louisiana','la'],['maine','me'],['maryland','md'],
+    ['massachusetts','ma'],['michigan','mi'],['minnesota','mn'],['mississippi','ms'],['missouri','mo'],
+    ['montana','mt'],['nebraska','ne'],['nevada','nv'],['new hampshire','nh'],['new jersey','nj'],
+    ['new mexico','nm'],['new york','ny'],['north carolina','nc'],['north dakota','nd'],['ohio','oh'],
+    ['oklahoma','ok'],['oregon','or'],['pennsylvania','pa'],['rhode island','ri'],['south carolina','sc'],
+    ['south dakota','sd'],['tennessee','tn'],['texas','tx'],['utah','ut'],['vermont','vt'],
+    ['virginia','va'],['washington','wa'],['west virginia','wv'],['wisconsin','wi'],['wyoming','wy'],
+    ['district of columbia','dc']
+  ];
+  const highwayStatePattern = highwayStates.flatMap(([name,code]) => [name,code,code.split('').join(' ')]).sort((a,b)=>b.length-a.length).join('|');
+  const highwayPrefixPattern = `(?:${highwayStatePattern}|us|state|county|co|north|south|east|west|n|s|e|w)`;
+  const numberedRoutePattern = new RegExp(`^(?:(\\d+[a-z]?)\\s+)?(?:${highwayPrefixPattern}\\s+)*(?:rout|route|rt|rte|hwy|highway|road|rd|sr|cr|interstate|i|us|${highwayStatePattern})\\s*(?:(?:us|${highwayStatePattern})\\s+)?(\\d+[a-z]?)\\b`);
+
   function addressSearchParts(value) {
     const base = normalizeWords(splitAddress(value).base).replace(/\bu\s+s\b/g, 'us');
-    const numberedRoute = /^(?:(\d+[a-z]?)\s+)?(?:(?:us|state|county|co|north|south|east|west|n|s|e|w)\s+)*(?:rt|rte|route|hwy|highway|sr|cr|us)\s*(?:us\s*)?(\d+[a-z]?)\b/.exec(base);
+    const numberedRoute = numberedRoutePattern.exec(base);
     if (numberedRoute) return {houseNumber: numberedRoute[1] || '', street: [numberedRoute[2]], numberedRoute: true};
     const words = base.split(' ').filter(Boolean);
     const houseIndex = words.findIndex(word => /^\d+[a-z]?$/.test(word));

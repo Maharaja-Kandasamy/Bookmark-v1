@@ -256,3 +256,20 @@ test('US highway designators are omitted while the route number is retained',()=
  assert.equal(engine.addressWildcard('5121 Houston Street'),'512*houst*');
  assert.equal(engine.splitAddress('5121 U.S. 135 STE A').unitKey,'a');
 });
+
+
+test('state highway names and codes are omitted only for numbered routes',()=>{
+ const states=[['Alabama','AL'],['Alaska','AK'],['Arizona','AZ'],['Arkansas','AR'],['California','CA'],['Colorado','CO'],['Connecticut','CT'],['Delaware','DE'],['Florida','FL'],['Georgia','GA'],['Hawaii','HI'],['Idaho','ID'],['Illinois','IL'],['Indiana','IN'],['Iowa','IA'],['Kansas','KS'],['Kentucky','KY'],['Louisiana','LA'],['Maine','ME'],['Maryland','MD'],['Massachusetts','MA'],['Michigan','MI'],['Minnesota','MN'],['Mississippi','MS'],['Missouri','MO'],['Montana','MT'],['Nebraska','NE'],['Nevada','NV'],['New Hampshire','NH'],['New Jersey','NJ'],['New Mexico','NM'],['New York','NY'],['North Carolina','NC'],['North Dakota','ND'],['Ohio','OH'],['Oklahoma','OK'],['Oregon','OR'],['Pennsylvania','PA'],['Rhode Island','RI'],['South Carolina','SC'],['South Dakota','SD'],['Tennessee','TN'],['Texas','TX'],['Utah','UT'],['Vermont','VT'],['Virginia','VA'],['Washington','WA'],['West Virginia','WV'],['Wisconsin','WI'],['Wyoming','WY'],['District of Columbia','DC']];
+ for(const pair of states)for(const label of pair){
+  assert.equal(engine.addressWildcard('5121 '+label+' Rout 135'),'512*135*',label);
+  assert.equal(engine.addressWildcard(label+' Highway 135 STE A'),'*135*',label);
+ }
+ for(const label of ['Rout','Route','RT','RTE','State Rout','State Road','SR','County Road','CR','Interstate','I'])assert.equal(engine.addressWildcard('5121 '+label+' 135'),'512*135*',label);
+ for(const address of ['5121 IN-135','5121 I.N. Route 135','5121 New York 135','5121 Highway NY 135','5121 North Carolina Highway 135'])assert.equal(engine.addressWildcard(address),'512*135*',address);
+ for(const [address,expected] of [['123 Washington Street','12*washingt*'],['123 Indiana Ave','12*india*'],['123 New York Avenue','12*n*yo*'],['123 State Street','12*sta*']])assert.equal(engine.addressWildcard(address),expected,address);
+ const plan=engine.createSearchPlan({address:'5121 Indiana Rout 135 STE A',city:'Austin',state:'IN',zip:'78701'});
+ for(const type of ['address-city','address-zip'])assert.equal(plan.find(q=>q.type===type).fields.address,'512*135*');
+ assert.equal(engine.splitAddress('5121 Indiana Rout 135 STE A').unitKey,'a');
+ assert.equal(engine.splitAddress('5121 FL Rout 135 STE A').unitKey,'a');
+ assert.equal(engine.splitAddress('5121 Main St FL 2').unitKey,'2');
+});
