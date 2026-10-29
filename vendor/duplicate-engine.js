@@ -22,7 +22,7 @@
   }
   const normalizeAddress = value => normalizeWords(splitAddress(value).base).split(' ')
     .filter(Boolean).map(token => suffixes.get(token) || token).join(' ').trim();
-  const addressNoise = new Set('street st road rd avenue ave av boulevard blvd drive dr lane ln highway hwy route rte court ct circle cir place pl terrace ter parkway pkwy way trail trl square sq expressway expy junction jct mount mt mountain mtn fort ft saint west w east e north n south s northeast ne northwest nw southeast se southwest sw'.split(' '));
+  const addressNoise = new Set('street st road rd avenue ave av boulevard blvd drive dr lane ln highway hwy route rte court ct circle cir place pl terrace ter parkway pkwy way trail trl square sq expressway expy junction jct mount mt mountain mtn fort ft saint us west w east e north n south s northeast ne northwest nw southeast se southwest sw'.split(' '));
   function inferStoreNumber(value) {
     const numbers = [...new Set([...cleanText(value).matchAll(/#\s*(\d+)(?![\da-z-])/gi)].map(match => match[1]))];
     return numbers.length === 1 ? numbers[0] : '';
@@ -56,8 +56,8 @@
   }
 
   function addressSearchParts(value) {
-    const base = normalizeWords(splitAddress(value).base);
-    const numberedRoute = /^(?:(\d+[a-z]?)\s+)?(?:(?:us|u s|state|county|co|north|south|east|west|n|s|e|w)\s+)*(?:rt|rte|route|hwy|highway|sr|cr)\s*(\d+[a-z]?)\b/.exec(base);
+    const base = normalizeWords(splitAddress(value).base).replace(/\bu\s+s\b/g, 'us');
+    const numberedRoute = /^(?:(\d+[a-z]?)\s+)?(?:(?:us|state|county|co|north|south|east|west|n|s|e|w)\s+)*(?:rt|rte|route|hwy|highway|sr|cr|us)\s*(?:us\s*)?(\d+[a-z]?)\b/.exec(base);
     if (numberedRoute) return {houseNumber: numberedRoute[1] || '', street: [numberedRoute[2]], numberedRoute: true};
     const words = base.split(' ').filter(Boolean);
     const houseIndex = words.findIndex(word => /^\d+[a-z]?$/.test(word));

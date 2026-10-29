@@ -238,3 +238,21 @@ test('banner plus state has its own query without requiring a ZIP',()=>{
  assert.deepEqual(plan[0].fields,{banner:'quic*stop*',state:'IN'});
  assert.equal(engine.createSearchPlan({bannerName:'Quick Stop'}).some(q=>q.type==='banner-state'),false);
 });
+
+
+test('US highway designators are omitted while the route number is retained',()=>{
+ for(const [address,expected] of [
+  ['5121 US 135','512*135*'],['5121 U.S. 135','512*135*'],
+  ['5121 US Highway 135','512*135*'],['5121 U.S. HWY 135','512*135*'],
+  ['5121 Highway US 135','512*135*'],['5121 Hwy U.S. 135','512*135*'],
+  ['5121 N US-135 STE A','512*135*'],['US 135 STE A','*135*'],
+  ['U.S. 135','*135*'],['US HWY 135','*135*'],['US-135','*135*'],
+  ['12345 US 1','123*1*']
+ ]){
+  assert.equal(engine.addressWildcard(address),expected,address);
+  const plan=engine.createSearchPlan({address,city:'Austin',zip:'78701'});
+  for(const type of ['address-city','address-zip'])assert.equal(plan.find(q=>q.type===type).fields.address,expected);
+ }
+ assert.equal(engine.addressWildcard('5121 Houston Street'),'512*houst*');
+ assert.equal(engine.splitAddress('5121 U.S. 135 STE A').unitKey,'a');
+});
