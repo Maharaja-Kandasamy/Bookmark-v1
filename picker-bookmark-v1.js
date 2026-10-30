@@ -1373,7 +1373,7 @@
         return;
       }
       if(target.classList.contains('google-search')) { const source=state.source||{}; const query=[source.bannerName,source.address,source.city,source.state,source.zip].filter(Boolean).join(' '); if (!query) return; if(!controller.openExternal(`https://www.google.com/search?q=${encodeURIComponent(query)}`)) $('.notice').textContent='Allow popups to open Google Search.'; return; }
-      if(target.classList.contains('copy-store')) return copy([`Banner: ${state.source?.bannerName||''}`,`Store #: ${state.source?.storeNumber||''}`,`Address: ${address()}`,`Phone: ${state.source?.phone||''}`].join('\n'));
+      if(target.classList.contains('copy-store')) { const source=state.source||{}; return copy([source.bannerName,source.storeNumber,source.address,source.city,source.state,source.zip,source.phone].map(Engine.cleanText).filter(Boolean).join(' ')); }
       if(target.classList.contains('address-search')) { if(!controller.openExternal(`https://www.google.com/search?q=${encodeURIComponent(address())}`)) $('.notice').textContent='Allow popups to open the address search.'; return; }
       if(target.classList.contains('map-search')) { if(!controller.openExternal(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address())}`)) $('.notice').textContent='Allow popups to open Maps.'; return; }
       if(target.dataset.result){ const item=(state.results||[])[Number(target.dataset.index)]; const candidate=item?.candidate||item; return copy(target.dataset.result==='td'?Engine.formatTdCopy(candidate):Engine.formatFullCopy(candidate)); }
