@@ -205,7 +205,7 @@ test('numbered routes remain searchable and keep suite information for ranking',
   {candidate:{slId:'1',address:'Route 135 Suite A'}}
  ]);
  assert.equal(ranked[0].candidate.slId,'1');
- assert.equal(engine.addressWildcard('135 STE A'),'');
+ assert.equal(engine.addressWildcard('135 STE A'),'*135*');
 });
 
 
@@ -321,7 +321,7 @@ test('building-only addresses preserve their full identifier and enable all addr
  assert.equal(engine.addressWildcard('BLDG 5207A'),'*5207a*');
  assert.equal(engine.addressWildcard('123 Main St BLDG 5207'),'12*ma*');
  assert.equal(engine.splitAddress('123 Main St BLDG 5207').unitKey,'5207');
- assert.equal(engine.addressWildcard('5207'),'');
+ assert.equal(engine.addressWildcard('5207'),'*5207*');
 });
 
 test('building identifiers match exactly and cannot match a longer building number by prefix',()=>{
@@ -333,4 +333,32 @@ test('building identifiers match exactly and cannot match a longer building numb
  ]);
  assert.equal(results.find(r=>r.candidate.slId==='1').fieldMatches.address,true);
  for(const id of ['2','3'])assert.equal(results.find(r=>r.candidate.slId===id).fieldMatches.address,undefined);
+});
+
+
+test('unusable street addresses search one clear number with leading and trailing wildcards',()=>{
+ for(const raw of ['5207','#5207','Unit 5207','Room 5207','Warehouse 5207','Unknown address 5207','Unknown5207','5207 Unknown','5207 Not Available','BLDG 5207 STE 2','5207 STE 2']){
+  assert.equal(engine.addressWildcard(raw),'*5207*',raw);
+  const queries=engine.createSearchPlan({address:raw,city:'Austin',state:'TX',zip:'78701'}).filter(q=>q.type.startsWith('address-'));
+  assert.equal(queries.length,3);queries.forEach(q=>assert.equal(q.fields.address,'*5207*'));
+ }
+ assert.equal(engine.addressWildcard('005207'),'*005207*');
+ assert.equal(engine.addressWildcard('123 Main St #5207'),'12*ma*');
+ assert.equal(engine.addressWildcard('5121 US Hwy 135'),'512*135*');
+ assert.equal(engine.addressWildcard('Reference 5207 / 9001'),'');
+ assert.equal(engine.addressWildcard('Unknown address'),'');
+});
+
+test('unit-only number searches never claim an exact full address and unit match',()=>{
+ const results=engine.consolidateCandidates({bannerName:'Acme',address:'Unit 5207'},[{candidate:{slId:'1',bannerName:'Acme',address:'Unit 5207'}}]);
+ assert.equal(results[0].exactUnitMatch,false);assert.equal(results[0].fieldMatches.unit,undefined);
+});
+
+
+test('Banner checks include cleaned banner plus city without requiring a ZIP',()=>{
+ const plan=engine.createSearchPlan({bannerName:'QUICK STOP C STORE #5',city:'  Fort   Wayne  ',zip:'46805'});
+ assert.deepEqual(plan.find(q=>q.type==='banner-city').fields,{banner:'quic*stop*',city:'Fort Wayne'});
+ const noZip=engine.createSearchPlan({bannerName:'Quick Stop',city:'Fort Wayne'});
+ assert.deepEqual(noZip.map(q=>q.type),['banner-city']);assert.deepEqual(noZip[0].fields,{banner:'quic*stop*',city:'Fort Wayne'});
+ assert.equal(engine.createSearchPlan({bannerName:'Quick Stop',zip:'46805'}).some(q=>q.type==='banner-city'),false);
 });

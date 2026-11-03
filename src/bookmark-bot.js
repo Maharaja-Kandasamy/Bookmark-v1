@@ -18,7 +18,7 @@
       </style>
       <div class="shell" data-state="ready">
         <div class="bot-status" hidden><span class="bot-progress" role="status" aria-live="polite"></span><button class="quick-pause" aria-label="Pause searches" title="Pause after the current search finishes">Pause</button><button class="quick-stop" aria-label="Stop searches">Stop</button></div>
-        <div class="quick-searches" aria-label="Automation searches"><button class="quick-search" data-search="banner" title="Banner searches" aria-label="Banner searches">B</button><button class="quick-search" data-search="bannerState" title="Banner + State search" aria-label="Banner + State search">BS</button><button class="quick-search" data-search="address" title="Address searches" aria-label="Address searches">A</button><button class="quick-search" data-search="phone" title="Phone search" aria-label="Phone search">P</button><button class="quick-search" data-search="store" title="Store number search" aria-label="Store number search">S</button><button class="quick-search" data-search="all" title="All Search" aria-label="All Search">All</button></div>
+        <div class="quick-searches" aria-label="Automation searches"><button class="quick-search" data-search="banner" title="Banner searches with city and ZIP" aria-label="Banner searches">B</button><button class="quick-search" data-search="bannerState" title="Banner + State search" aria-label="Banner + State search">BS</button><button class="quick-search" data-search="address" title="Address searches" aria-label="Address searches">A</button><button class="quick-search" data-search="phone" title="Phone search" aria-label="Phone search">P</button><button class="quick-search" data-search="store" title="Store number search" aria-label="Store number search">S</button><button class="quick-search" data-search="all" title="All Search" aria-label="All Search">All</button></div>
         <button class="bot" title="Open Picker Bookmark v1" aria-label="Open Picker Bookmark v1">
           ${root.PickerBookmarkRobot.svg}
         </button>
@@ -123,7 +123,7 @@
       $('.google-banner-city').disabled = !source.bannerName || !source.city;
       $('.notice').textContent=state.diagnostic || (state.status === 'ready' ? 'Ready.' : state.status === 'completed' ? 'Checks complete.' : state.status === 'paused' ? 'Paused. The current search may finish; Continue resumes the remaining checks.' : 'Checking current record.');
 
-      const queryGroups = {banner:['banner-exact-zip','banner-wildcard-zip'],bannerState:['banner-state'],address:['address-city','address-state','address-zip'],phone:['phone'],store:['store-banner']};
+      const queryGroups = {banner:['banner-exact-zip','banner-city','banner-wildcard-zip'],bannerState:['banner-state'],address:['address-city','address-state','address-zip'],phone:['phone'],store:['store-banner']};
       shadow.querySelectorAll('[data-search]').forEach(button => { const group=button.dataset.search; button.disabled=busy || !availablePlan.some(query => group==='all' || queryGroups[group]?.includes(query.type)); if(group==='store'){const query=availablePlan.find(query=>query.type==='store-banner');button.title=query?'Store #'+query.fields.storeNumber+' + '+query.fields.banner:'Store search requires a store number and a usable banner';} });
       const manualRequired = !state.source && !!state.diagnostic;
       $('.notice').dataset.tone = manualRequired ? 'warning' : 'info';

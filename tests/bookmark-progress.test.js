@@ -8,3 +8,7 @@ test('robot progress names the active search, final TD review, completion and st
  assert.equal(progress({status:'cancelled'}),'Stopped');
  assert.equal(progress({status:'incomplete'}),'Needs attention - open results');
 });
+
+test('progress identifies the native Banner plus City step',()=>{
+ assert.match(progress({status:'waiting',activeQuery:{type:'banner-city'},progress:2,total:3}),/business name \+ city/);
+});

@@ -96,11 +96,24 @@
     }
     return {houseNumber, street};
   }
+  function fallbackAddressNumber(value) {
+    const text=cleanText(value);
+    const locator=/^(?:#|(?:building|bldg|suite|ste|unit|apartment|apt|room|rm|floor|fl|lot|block|site|warehouse|hangar|kiosk|stall|office)[.\s:#-]*)(\d+)\b/i.exec(text);
+    if(locator)return locator[1];
+    const base=splitAddress(text).base;
+    const numbers=[...new Set((base.match(/\d+/g) || text.match(/\d+/g) || []))];
+    return numbers.length===1?numbers[0]:'';
+  }
   function addressWildcard(value) {
     const building=standaloneBuilding(value);
     if(building)return '*'+building+'*';
     const {houseNumber,street,numberedRoute} = addressSearchParts(value);
-    if (!street.length) return '';
+    const placeholders=new Set('unknown unavailable invalid unspecified missing none null na not available provided address tbd'.split(' '));
+    const usefulStreet=street.some(word=>/[a-z]/i.test(word) && !placeholders.has(word));
+    if(!numberedRoute && (!usefulStreet || (!houseNumber && /\d/.test(cleanText(value))))){
+      const number=fallbackAddressNumber(value);
+      return number?'*'+number+'*':'';
+    }
     const house = houseNumber ? houseNumber.slice(0, Math.max(1,houseNumber.length-(houseNumber.length>4?2:1))) : '';
     if (numberedRoute) return (house ? house + '*' : '*') + street[0] + '*';
     const words = street.map(word => /^\d+$/.test(word) ? word : word.slice(0,Math.max(1,word.length-2)));
@@ -201,6 +214,7 @@
     const bannerNeedsWildcard = /[0-9]|[^a-z0-9\s]|\band\b/i.test(source.bannerName);
     const candidates = [
       !bannerNeedsWildcard && bannerWildcard && source.zip3 && { type: 'banner-exact-zip', label: 'Exact banner + ZIP3', fields: { banner: bannerSearchWords(source.bannerName).join(' '), zip: source.zip3 } },
+      bannerWildcard && source.city && { type: 'banner-city', label: 'Wildcard banner + city', fields: { banner: bannerWildcard, city: source.city } },
       bannerWildcard && cleanText(source.state) && { type: 'banner-state', label: 'Wildcard banner + state', fields: { banner: bannerWildcard, state: cleanText(source.state) } },
       bannerWildcard && source.zip3 && { type: 'banner-wildcard-zip', label: 'Wildcard banner + ZIP3', fields: { banner: bannerWildcard, zip: source.zip3 } },
       addressWildcard && source.city && { type: 'address-city', label: 'Wildcard address + city', fields: { address: addressWildcard, city: source.city } },
@@ -231,7 +245,7 @@
     if (sameStore) { rules.push('Same store number'); fieldMatches.storeNumber=true; score+=20; }
     const sameAddress = includesAddress(source.addressKey, other.addressKey);
     if (sameAddress) { const exactAddress=source.addressKey===other.addressKey; rules.push(exactAddress?'Same standardized address':'Same or partial standardized address'); fieldMatches.address=true; score+=exactAddress?25:15; }
-    const exactUnitMatch = !!(source.unitKey && source.unitKey === other.unitKey && source.addressKey === other.addressKey);
+    const exactUnitMatch = !!(source.addressKey && source.unitKey && source.unitKey === other.unitKey && source.addressKey === other.addressKey);
     if (exactUnitMatch) { score+=10; fieldMatches.unit=true; rules.push('Same full address and unit'); }
     if (source.unitKey && other.unitKey && source.unitKey !== other.unitKey) rules.push(`Different unit: ${other.unitKey.toUpperCase()} instead of ${source.unitKey.toUpperCase()}`);
     if (sameAddress && sameStore) rules.push('Same address and store number');
@@ -1181,7 +1195,7 @@
       const current = store.get();
       if (!current?.source) return { status: 'error', observations: [], diagnostic: current?.diagnostic || 'Source table not found' };
       store.set({searchGroup:group});
-      const groups = { banner: ['banner-exact-zip','banner-wildcard-zip'], bannerState: ['banner-state'], address: ['address-city','address-state','address-zip'], phone: ['phone'], store: ['store-banner'] };
+      const groups = { banner: ['banner-exact-zip','banner-city','banner-wildcard-zip'], bannerState: ['banner-state'], address: ['address-city','address-state','address-zip'], phone: ['phone'], store: ['store-banner'] };
       const plan = Engine.createSearchPlan(current.source).filter(query => group === 'all' || groups[group]?.includes(query.type));
       if (!plan.length) {
         const result = { status: 'incomplete', observations: [], progress: 0, total: 0, diagnostic: 'Not enough source data to create searches' };
@@ -1297,7 +1311,7 @@
     if(state.status === 'paused')return 'Paused';
     if(state.activeQuery?.type === 'links')return `Reviewing links for the top ${(state.tdIds || []).length} matches...`;
     const type=state.activeQuery?.type || '';
-    const name=type==='banner-state'?'business name + state':type.startsWith('address')?'address':type.startsWith('banner')?'business name':type==='phone'?'phone':type==='store-banner'?'store number':'records';
+    const name=type==='banner-city'?'business name + city':type==='banner-state'?'business name + state':type.startsWith('address')?'address':type.startsWith('banner')?'business name':type==='phone'?'phone':type==='store-banner'?'store number':'records';
     if(['running','waiting'].includes(state.status))return state.activeQuery ? `Searching ${name} · ${state.progress || 0} of ${state.total || 0}` : 'Starting searches...';
     return 'Ready';
   }
@@ -1323,7 +1337,7 @@
       </style>
       <div class="shell" data-state="ready">
         <div class="bot-status" hidden><span class="bot-progress" role="status" aria-live="polite"></span><button class="quick-pause" aria-label="Pause searches" title="Pause after the current search finishes">Pause</button><button class="quick-stop" aria-label="Stop searches">Stop</button></div>
-        <div class="quick-searches" aria-label="Automation searches"><button class="quick-search" data-search="banner" title="Banner searches" aria-label="Banner searches">B</button><button class="quick-search" data-search="bannerState" title="Banner + State search" aria-label="Banner + State search">BS</button><button class="quick-search" data-search="address" title="Address searches" aria-label="Address searches">A</button><button class="quick-search" data-search="phone" title="Phone search" aria-label="Phone search">P</button><button class="quick-search" data-search="store" title="Store number search" aria-label="Store number search">S</button><button class="quick-search" data-search="all" title="All Search" aria-label="All Search">All</button></div>
+        <div class="quick-searches" aria-label="Automation searches"><button class="quick-search" data-search="banner" title="Banner searches with city and ZIP" aria-label="Banner searches">B</button><button class="quick-search" data-search="bannerState" title="Banner + State search" aria-label="Banner + State search">BS</button><button class="quick-search" data-search="address" title="Address searches" aria-label="Address searches">A</button><button class="quick-search" data-search="phone" title="Phone search" aria-label="Phone search">P</button><button class="quick-search" data-search="store" title="Store number search" aria-label="Store number search">S</button><button class="quick-search" data-search="all" title="All Search" aria-label="All Search">All</button></div>
         <button class="bot" title="Open Picker Bookmark v1" aria-label="Open Picker Bookmark v1">
           ${root.PickerBookmarkRobot.svg}
         </button>
@@ -1428,7 +1442,7 @@
       $('.google-banner-city').disabled = !source.bannerName || !source.city;
       $('.notice').textContent=state.diagnostic || (state.status === 'ready' ? 'Ready.' : state.status === 'completed' ? 'Checks complete.' : state.status === 'paused' ? 'Paused. The current search may finish; Continue resumes the remaining checks.' : 'Checking current record.');
 
-      const queryGroups = {banner:['banner-exact-zip','banner-wildcard-zip'],bannerState:['banner-state'],address:['address-city','address-state','address-zip'],phone:['phone'],store:['store-banner']};
+      const queryGroups = {banner:['banner-exact-zip','banner-city','banner-wildcard-zip'],bannerState:['banner-state'],address:['address-city','address-state','address-zip'],phone:['phone'],store:['store-banner']};
       shadow.querySelectorAll('[data-search]').forEach(button => { const group=button.dataset.search; button.disabled=busy || !availablePlan.some(query => group==='all' || queryGroups[group]?.includes(query.type)); if(group==='store'){const query=availablePlan.find(query=>query.type==='store-banner');button.title=query?'Store #'+query.fields.storeNumber+' + '+query.fields.banner:'Store search requires a store number and a usable banner';} });
       const manualRequired = !state.source && !!state.diagnostic;
       $('.notice').dataset.tone = manualRequired ? 'warning' : 'info';

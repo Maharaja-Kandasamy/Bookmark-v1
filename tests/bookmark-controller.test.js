@@ -109,13 +109,13 @@ test('missing Manual screen shows activation warning and clears it when source b
 });
 
 test('separate searches run only their own group while All Search includes every query', async () => {
- const types=['banner-exact-zip','banner-wildcard-zip','address-city','address-zip','phone','store-banner','banner-state','address-state'];
+ const types=['banner-exact-zip','banner-wildcard-zip','address-city','address-zip','phone','store-banner','banner-state','address-state','banner-city'];
  const {controller}=setup({PickerDuplicateEngine:{
   normalizeZip: require('../vendor/duplicate-engine').normalizeZip,
   createSearchPlan:()=>types.map(type=>({id:type,type})),
   consolidateCandidates:()=>[]
  }});
- for(const [group,expected] of [['banner',types.slice(0,2)],['address',[types[2],types[3],'address-state']],['phone',['phone']],['store',['store-banner']],['bannerState',['banner-state']],['all',types]]){
+ for(const [group,expected] of [['banner',[...types.slice(0,2),'banner-city']],['address',[types[2],types[3],'address-state']],['phone',['phone']],['store',['store-banner']],['bannerState',['banner-state']],['all',types]]){
   const result=await controller.run(group);
   assert.deepEqual(Array.from(result.plan,q=>q.type),expected);
   assert.deepEqual(Array.from(result.observations,q=>q.queryId),expected);
@@ -260,9 +260,9 @@ test('All Search submits only the top five unique TDs from its own completed sea
   PickerBookmarkLinks:{execute:async ids=>{submissions.push([...ids]);return {status:'complete'};}}
  });
  const result=await controller.run('all');
- assert.equal(sequence,8);assert.equal(submissions.length,1);assert.deepEqual(submissions[0],['0000001','0000002','0000003','0000004','0000005']);
+ assert.equal(sequence,9);assert.equal(submissions.length,1);assert.deepEqual(submissions[0],['0000001','0000002','0000003','0000004','0000005']);
  assert.equal(result.results.some(row=>row.candidate.slId==='9999999'),false);
- assert.equal(result.status,'completed');assert.equal(result.total,9);
+ assert.equal(result.status,'completed');assert.equal(result.total,10);
 });
 
 test('empty or incomplete current searches cannot reuse previous TDs or trigger final lookup',async()=>{

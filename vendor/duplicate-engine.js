@@ -95,11 +95,24 @@
     }
     return {houseNumber, street};
   }
+  function fallbackAddressNumber(value) {
+    const text=cleanText(value);
+    const locator=/^(?:#|(?:building|bldg|suite|ste|unit|apartment|apt|room|rm|floor|fl|lot|block|site|warehouse|hangar|kiosk|stall|office)[.\s:#-]*)(\d+)\b/i.exec(text);
+    if(locator)return locator[1];
+    const base=splitAddress(text).base;
+    const numbers=[...new Set((base.match(/\d+/g) || text.match(/\d+/g) || []))];
+    return numbers.length===1?numbers[0]:'';
+  }
   function addressWildcard(value) {
     const building=standaloneBuilding(value);
     if(building)return '*'+building+'*';
     const {houseNumber,street,numberedRoute} = addressSearchParts(value);
-    if (!street.length) return '';
+    const placeholders=new Set('unknown unavailable invalid unspecified missing none null na not available provided address tbd'.split(' '));
+    const usefulStreet=street.some(word=>/[a-z]/i.test(word) && !placeholders.has(word));
+    if(!numberedRoute && (!usefulStreet || (!houseNumber && /\d/.test(cleanText(value))))){
+      const number=fallbackAddressNumber(value);
+      return number?'*'+number+'*':'';
+    }
     const house = houseNumber ? houseNumber.slice(0, Math.max(1,houseNumber.length-(houseNumber.length>4?2:1))) : '';
     if (numberedRoute) return (house ? house + '*' : '*') + street[0] + '*';
     const words = street.map(word => /^\d+$/.test(word) ? word : word.slice(0,Math.max(1,word.length-2)));
@@ -200,6 +213,7 @@
     const bannerNeedsWildcard = /[0-9]|[^a-z0-9\s]|\band\b/i.test(source.bannerName);
     const candidates = [
       !bannerNeedsWildcard && bannerWildcard && source.zip3 && { type: 'banner-exact-zip', label: 'Exact banner + ZIP3', fields: { banner: bannerSearchWords(source.bannerName).join(' '), zip: source.zip3 } },
+      bannerWildcard && source.city && { type: 'banner-city', label: 'Wildcard banner + city', fields: { banner: bannerWildcard, city: source.city } },
       bannerWildcard && cleanText(source.state) && { type: 'banner-state', label: 'Wildcard banner + state', fields: { banner: bannerWildcard, state: cleanText(source.state) } },
       bannerWildcard && source.zip3 && { type: 'banner-wildcard-zip', label: 'Wildcard banner + ZIP3', fields: { banner: bannerWildcard, zip: source.zip3 } },
       addressWildcard && source.city && { type: 'address-city', label: 'Wildcard address + city', fields: { address: addressWildcard, city: source.city } },
@@ -230,7 +244,7 @@
     if (sameStore) { rules.push('Same store number'); fieldMatches.storeNumber=true; score+=20; }
     const sameAddress = includesAddress(source.addressKey, other.addressKey);
     if (sameAddress) { const exactAddress=source.addressKey===other.addressKey; rules.push(exactAddress?'Same standardized address':'Same or partial standardized address'); fieldMatches.address=true; score+=exactAddress?25:15; }
-    const exactUnitMatch = !!(source.unitKey && source.unitKey === other.unitKey && source.addressKey === other.addressKey);
+    const exactUnitMatch = !!(source.addressKey && source.unitKey && source.unitKey === other.unitKey && source.addressKey === other.addressKey);
     if (exactUnitMatch) { score+=10; fieldMatches.unit=true; rules.push('Same full address and unit'); }
     if (source.unitKey && other.unitKey && source.unitKey !== other.unitKey) rules.push(`Different unit: ${other.unitKey.toUpperCase()} instead of ${source.unitKey.toUpperCase()}`);
     if (sameAddress && sameStore) rules.push('Same address and store number');
