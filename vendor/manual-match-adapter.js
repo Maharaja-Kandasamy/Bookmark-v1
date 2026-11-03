@@ -133,7 +133,8 @@
     const dialog = findDialog();
     if (!dialog) return { ok: false, diagnostic: 'Manual Match dialog not open' };
     const profile = options.profile === 'retailSync' ? 'retailSync' : 'storeView';
-    const cleared = clearSearchFilters({dialog,fields:captureSearchFields(dialog,profile)});
+    const snapshot = options.fieldSnapshot || {dialog,fields:captureSearchFields(dialog,profile)};
+    const cleared = clearSearchFilters(snapshot);
     if (!cleared.ok) return cleared;
     for (const control of controlsForQuery(query, profile)) {
       const found = discoverControl(dialog, control.key, profile);
@@ -166,9 +167,8 @@
   }
 
   async function executeSearch(query, options = {}) {
-    const timeoutMs = options.timeoutMs || 30000;
-    const stableMs = options.stableMs || 1500;
-    const prepared = prepareQuery(query, { profile:options.profile });
+    if (options.isCurrent && !options.isCurrent()) return {status:'incomplete',rows:[],diagnostic:'Source record changed'};
+    const prepared = prepareQuery(query, { profile:options.profile,fieldSnapshot:options.fieldSnapshot });
     if (!prepared.ok) return { status: 'incomplete', rows: [], diagnostic: prepared.diagnostic };
     const dialog = prepared.dialog;
     const foundSearch = findSearchButton(dialog);
@@ -216,6 +216,7 @@
         } catch(error){finish({status:'incomplete',rows:[],diagnostic:'Search could not finish: '+String(error?.message || 'The page changed').split(/[\r\n]/)[0].slice(0,180)});}
       };
       try {
+        if(options.isCurrent && !options.isCurrent())return finish({status:'incomplete',rows:[],diagnostic:'Source record changed'});
         before=lastSignature=tableSignature(dialog);
         if(typeof MutationObserver!=='undefined' && observedRoot){
           observer=new MutationObserver(records=>{
@@ -262,7 +263,7 @@
   async function execute(query,options={}) {
     if(options.signal?.aborted)return {status:'incomplete',rows:[],diagnostic:'Search cancelled'};
     let snapshot,result;
-    try {snapshot=captureFields(options.profile);result=await executeSearch(query,options);}
+    try {snapshot=captureFields(options.profile);result=await executeSearch(query,{...options,fieldSnapshot:snapshot});}
     catch(error){result={status:'incomplete',rows:[],diagnostic:'Search could not finish: '+String(error?.message || 'The page changed').split(/[\r\n]/)[0].slice(0,180)};}
     finally {
       try {const restored=restoreFields(snapshot);if(restored?.ok===false)result={...result,status:'incomplete',diagnostic:restored.diagnostic};}

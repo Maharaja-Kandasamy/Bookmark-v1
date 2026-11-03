@@ -34,6 +34,12 @@ test('Stop disconnects result observers and abort listeners immediately',async()
 });
 
 test('a source-check exception is a recoverable result rather than an uncaught timer error',async()=>{
- const f=setup();const result=await f.A.submitAndWait(f.dialog,f.search,{timeoutMs:10000,isCurrent(){throw Error('Source disappeared');}});
+ let checks=0;const f=setup();const result=await f.A.submitAndWait(f.dialog,f.search,{timeoutMs:10000,isCurrent(){if(++checks>1)throw Error('Source disappeared');return true;}});
  assert.equal(result.status,'incomplete');assert.match(result.diagnostic,/Source disappeared/);assert.equal(f.observer().connected,false);
+});
+
+test('a changed record is rejected before the Search button is clicked',async()=>{
+ let clicks=0;const f=setup(()=>{clicks++;});
+ const result=await f.A.submitAndWait(f.dialog,f.search,{timeoutMs:10000,isCurrent:()=>false});
+ assert.equal(result.status,'incomplete');assert.equal(clicks,0);assert.match(result.diagnostic,/Source record changed/);
 });

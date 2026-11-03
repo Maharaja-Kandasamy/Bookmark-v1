@@ -184,7 +184,7 @@
       if(target.classList.contains('bot')) { if(suppressClick){suppressClick=false;return;} animateRobot('waving',1200); return open?closePanel():openPanel(); }
       if(target.classList.contains('close')) return closePanel();
       if(target.classList.contains('quick-stop')) { controller.cancel(); return; }
-      if(target.dataset.search || target.classList.contains('run') || target.classList.contains('retry')) { closePanel(); return controller.run(target.dataset.search || 'all').catch(error=>{ $('.notice').textContent=error.message; $('.bot').title=error.message; }); }
+      if(target.dataset.search || target.classList.contains('run') || target.classList.contains('retry')) { closePanel(); return controller.run(target.dataset.search || (target.classList.contains('retry') ? store.get()?.searchGroup || 'all' : 'all')).catch(error=>{ $('.notice').textContent=error.message; $('.bot').title=error.message; }); }
       if(target.classList.contains('pause') || target.classList.contains('quick-pause')) return store.get()?.status==='paused'?controller.resume():controller.pause();
       if(target.classList.contains('cancel')) return controller.cancel();
       if(target.classList.contains('kill')) return kill();

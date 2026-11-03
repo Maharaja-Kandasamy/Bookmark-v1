@@ -35,7 +35,7 @@ test('controller scans current table and consolidates sequential results', async
   assert.equal(scan.profile, 'storeView');
   const result = await controller.run();
   assert.equal(result.status, 'completed');
-  assert.deepEqual(Array.from(store.get().results, x => x.slId), ['A', 'one', 'two']);
+  assert.deepEqual(Array.from(store.get().results, x => x.slId), ['one', 'two']);
 });
 
 test('destroy cancels work before disposing lifecycle and state', () => {
@@ -228,4 +228,56 @@ test('an unexpected final TD error retains ranked results and permits retry',asy
 test('normalization errors are shown locally instead of escaping a background scan',()=>{
  const {controller,store}=setup({PickerDuplicateEngine:{normalizeSource(){throw Error('Invalid source');}}});
  assert.equal(controller.scan().error,'source-read-failed');assert.match(store.get().diagnostic,/could not be prepared/);
+});
+
+
+test('individual searches never perform final TD lookup and never rank pre-existing table rows',async()=>{
+ const Engine=require('../vendor/duplicate-engine');let prior=[{slId:'9999999',bannerName:'Zone Appliance',address:'10 Main St'}];let sequence=0,tdSearches=0;
+ const source={slId:'SOURCE',bannerName:'Zone Appliance',storeNumber:'12',address:'10 Main St',city:'Austin',state:'TX',zip:'78701',phone:'5125551212'};
+ const {controller,store}=setup({
+  PickerDuplicateEngine:Engine,
+  PickerGsrsTableAdapter:{extractFromDocument:()=>({profile:'storeView',source,candidates:prior})},
+  PickerManualMatchAdapter:{execute:async()=>({status:'complete',rows:[{slId:String(++sequence).padStart(7,'0'),bannerName:source.bannerName,address:source.address}]})},
+  PickerBookmarkLinks:{execute:async()=>{tdSearches++;return {status:'complete'};}}
+ });
+ for(const group of ['banner','bannerState','address','phone','store']){
+  const before=sequence,result=await controller.run(group);
+  assert.equal(result.status,'completed',group);assert.equal(tdSearches,0,group);
+  assert.equal(store.get().searchGroup,group);assert.equal(result.linksSearch,null,group);assert.equal(result.tdIds.length,0,group);
+  assert.equal(result.results.length,sequence-before,group);
+  for(const row of result.results)assert.ok(Number(row.candidate.slId)>before && Number(row.candidate.slId)<=sequence,group);
+  assert.equal(store.get().results.some(row=>row.candidate.slId==='9999999'),false);
+  prior=result.results.map(row=>row.candidate);
+ }
+});
+
+test('All Search submits only the top five unique TDs from its own completed searches',async()=>{
+ const Engine=require('../vendor/duplicate-engine');const source={slId:'SRC',bannerName:'Acme',address:'10 Main St',city:'Austin',state:'TX',zip:'78701',phone:'5125551212',storeNumber:'12'};
+ let sequence=0;const submissions=[];
+ const {controller}=setup({PickerDuplicateEngine:Engine,
+  PickerGsrsTableAdapter:{extractFromDocument:()=>({profile:'storeView',source,candidates:[{...source,slId:'9999999'}]})},
+  PickerManualMatchAdapter:{execute:async()=>({status:'complete',rows:[{...source,slId:String(++sequence).padStart(7,'0')}]})},
+  PickerBookmarkLinks:{execute:async ids=>{submissions.push([...ids]);return {status:'complete'};}}
+ });
+ const result=await controller.run('all');
+ assert.equal(sequence,7);assert.equal(submissions.length,1);assert.deepEqual(submissions[0],['0000001','0000002','0000003','0000004','0000005']);
+ assert.equal(result.results.some(row=>row.candidate.slId==='9999999'),false);
+ assert.equal(result.status,'completed');assert.equal(result.total,8);
+});
+
+test('empty or incomplete current searches cannot reuse previous TDs or trigger final lookup',async()=>{
+ for(const status of ['complete','incomplete']){
+  let tdSearches=0;const Engine=require('../vendor/duplicate-engine');
+  const {controller}=setup({PickerDuplicateEngine:Engine,
+   PickerGsrsTableAdapter:{extractFromDocument:()=>({profile:'storeView',source:{slId:'SRC',bannerName:'Acme',zip:'78701'},candidates:[{slId:'9999999',bannerName:'Acme'}]})},
+   PickerManualMatchAdapter:{execute:async()=>({status,rows:status==='complete'?[]:[{slId:'8888888',bannerName:'Acme'}]})},
+   PickerBookmarkLinks:{execute:async()=>{tdSearches++;return {status:'complete'};}}
+  });
+  const result=await controller.run('all');assert.equal(result.results.length,0);assert.equal(result.tdIds.length,0);assert.equal(tdSearches,0);
+ }
+});
+
+test('observations from an unrelated query cannot enter current rankings',async()=>{
+ const {controller}=setup({PickerRunController:{createRunController:()=>({start:async()=>({status:'completed',observations:[{queryId:'old-query',status:'complete',rows:[{slId:'9999999'}]},{queryId:'one',status:'complete',rows:[{slId:'0000001'}]}]}),isActive:()=>false,cancel(){}})}});
+ const result=await controller.run();assert.deepEqual(Array.from(result.results,row=>row.slId),['0000001']);
 });

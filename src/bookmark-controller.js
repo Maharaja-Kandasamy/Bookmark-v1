@@ -70,19 +70,21 @@
       invalidate();
       extraction = null;
       if (found?.error) {
-        store.set({ status: 'error', diagnostic: found.diagnostic || 'You need to be in the Manual screen to activate me.', diagnosticCode: found.error, source: null, results: [], linksSearch: null, tdIds: [], initialCandidates: [], observations: [], plan: [], progress: 0, total: 0, activeQuery: null });
+        store.set({ status: 'error', diagnostic: found.diagnostic || 'You need to be in the Manual screen to activate me.', diagnosticCode: found.error, source: null, results: [], searchGroup: null, linksSearch: null, tdIds: [], initialCandidates: [], observations: [], plan: [], progress: 0, total: 0, activeQuery: null });
         return found;
       }
       extraction = found;
-      store.set({ status: 'ready', profile: found.profile, source: normalized, initialCandidates: found.candidates || [], sourceRowCount: found.sourceRowCount, initialCandidateCount: found.initialCandidateCount, results: [], linksSearch: null, tdIds: [], observations: [], plan: [], progress: 0, total: 0, activeQuery: null, diagnostic: '', diagnosticCode: '' });
+      store.set({ status: 'ready', profile: found.profile, source: normalized, initialCandidates: found.candidates || [], sourceRowCount: found.sourceRowCount, initialCandidateCount: found.initialCandidateCount, results: [], searchGroup: null, linksSearch: null, tdIds: [], observations: [], plan: [], progress: 0, total: 0, activeQuery: null, diagnostic: '', diagnosticCode: '' });
       return found;
     }
 
     async function runChecks(group = 'all') {
-      scan();
+      // Existing table rows may belong to a previous search. Start with source data only.
+      scan(readSource(false));
       const runRevision = revision;
       const current = store.get();
       if (!current?.source) return { status: 'error', observations: [], diagnostic: current?.diagnostic || 'Source table not found' };
+      store.set({searchGroup:group});
       const groups = { banner: ['banner-exact-zip','banner-wildcard-zip'], bannerState: ['banner-state'], address: ['address-city','address-zip'], phone: ['phone'], store: ['store-banner'] };
       const plan = Engine.createSearchPlan(current.source).filter(query => group === 'all' || groups[group]?.includes(query.type));
       if (!plan.length) {
@@ -100,12 +102,14 @@
       const runResult = await runner.start(plan);
       refresh();
       if (destroyed || runRevision !== revision) return { status: 'cancelled', observations: [], results: [] };
-      const initial = (current.initialCandidates || []).map(candidate => ({ queryId: 'initial-table', candidate }));
-      const searched = (runResult.observations || []).flatMap(observation => (observation.rows || []).map(candidate => ({ queryId: observation.queryId, candidate })));
-      const results = Engine.consolidateCandidates(current.source, [...initial, ...searched]);
-      const tdIds = Engine.getTopTdIds ? Engine.getTopTdIds(results) : [];
+      const currentQueryIds = new Set(plan.map(query => query.id));
+      const searched = (runResult.observations || [])
+        .filter(observation => observation.status === 'complete' && currentQueryIds.has(observation.queryId))
+        .flatMap(observation => (observation.rows || []).map(candidate => ({ queryId: observation.queryId, candidate })));
+      const results = Engine.consolidateCandidates(current.source, searched);
+      const tdIds = group === 'all' && Engine.getTopTdIds ? Engine.getTopTdIds(results) : [];
       let linksSearch = null;
-      if (runResult.status === 'completed' && tdIds.length) {
+      if (group === 'all' && runResult.status === 'completed' && tdIds.length) {
         const aborter = new AbortController();
         completionAborter = aborter;
         store.set({status:'waiting',results,tdIds,activeQuery:{type:'links',label:`Reviewing links for the top ${tdIds.length} matches...`},progress:plan.length,total:plan.length+1});
@@ -119,7 +123,7 @@
         if (destroyed || runRevision !== revision) return {status:'cancelled',observations:[],results:[]};
       }
       const linksIncomplete = linksSearch && linksSearch.status !== 'complete';
-      const result = { ...runResult, plan, results, linksSearch, tdIds, activeQuery: null,
+      const result = { ...runResult, searchGroup:group, plan, results, linksSearch, tdIds, activeQuery: null,
         ...(linksSearch ? {status:linksSearch.status==='cancelled'?'cancelled':linksIncomplete?'incomplete':'completed',progress:plan.length+(linksIncomplete?0:1),total:plan.length+1,
           diagnostic:linksIncomplete ? `Ranked results saved. Final Links search incomplete: ${linksSearch.diagnostic || 'Search did not finish'}. TDs: ${tdIds.join(',')}` : `Top ${tdIds.length} TDs searched in Links: ${tdIds.join(',')}`} : {}) };
       store.set(result);

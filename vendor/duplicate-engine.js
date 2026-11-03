@@ -184,8 +184,7 @@
 
   const includesAddress = (a, b) => a && b && (a === b || a.includes(b) || b.includes(a));
 
-  function classify(source, candidate) {
-    const other = normalizeSource(candidate);
+  function classify(source, other) {
     const rules = [];
     const fieldMatches = {};
     let score = 0;
@@ -221,9 +220,9 @@
     observations.forEach(observation => {
       const candidate = observation.candidate || observation;
       if (source.slId && cleanText(candidate.slId).toLowerCase() === source.slId.toLowerCase()) return;
-      const judged = classify(source, candidate);
-      if (!judged.classification) return;
       const normalized = normalizeSource(candidate);
+      const judged = classify(source, normalized);
+      if (!judged.classification) return;
       const key = normalized.slId
         ? `id:${normalized.slId.toLowerCase()}`
         : `fallback:${normalized.bannerKey}|${normalized.addressKey}|${normalized.storeKey}|${normalized.phone7}`;
