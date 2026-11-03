@@ -307,3 +307,30 @@ test('Store search extracts main banner patterns without a brand-name list',()=>
  const differentAddress={bannerName:'North Star 651 East State Blvd',address:'99 Oak Road'};
  assert.match(engine.storeBannerWildcard(differentAddress),/stat/);
 });
+
+
+test('building-only addresses preserve their full identifier and enable all address combinations',()=>{
+ for(const address of ['BLDG 5207','Building 5207','BLDG. #5207','BLDG5207','Building No. 5207']){
+  assert.equal(engine.addressWildcard(address),'*5207*',address);
+  assert.equal(engine.normalizeAddress(address),'building 5207',address);
+  assert.equal(engine.splitAddress(address).unitKey,'');
+  const plan=engine.createSearchPlan({address,city:'Austin',state:'TX',zip:'78701'}).filter(q=>q.type.startsWith('address-'));
+  assert.equal(plan.length,3);plan.forEach(q=>assert.equal(q.fields.address,'*5207*'));
+ }
+ assert.equal(engine.addressWildcard('BLDG 005207'),'*005207*');
+ assert.equal(engine.addressWildcard('BLDG 5207A'),'*5207a*');
+ assert.equal(engine.addressWildcard('123 Main St BLDG 5207'),'12*ma*');
+ assert.equal(engine.splitAddress('123 Main St BLDG 5207').unitKey,'5207');
+ assert.equal(engine.addressWildcard('5207'),'');
+});
+
+test('building identifiers match exactly and cannot match a longer building number by prefix',()=>{
+ const source={bannerName:'Acme',address:'BLDG 5207',city:'Austin',state:'TX',zip:'78701'};
+ const results=engine.consolidateCandidates(source,[
+  {candidate:{...source,slId:'1',address:'Building 5207'}},
+  {candidate:{...source,slId:'2',address:'BLDG 52070'}},
+  {candidate:{...source,slId:'3',address:'5207 Main St'}}
+ ]);
+ assert.equal(results.find(r=>r.candidate.slId==='1').fieldMatches.address,true);
+ for(const id of ['2','3'])assert.equal(results.find(r=>r.candidate.slId===id).fieldMatches.address,undefined);
+});

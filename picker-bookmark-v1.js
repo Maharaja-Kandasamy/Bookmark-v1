@@ -15,8 +15,14 @@
   const cleanText = value => String(value ?? '').trim().replace(/\s+/g, ' ');
   const normalizeWords = value => cleanText(value).toLowerCase()
     .replace(/&/g, ' and ').replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+  function standaloneBuilding(value) {
+    const match=/^(?:building|bldg)[.\s:#-]*(?:(?:no\.?|number)\s*)?(\d+[a-z]?(?:-\d+[a-z]?)?)[.\s]*$/i.exec(cleanText(value));
+    return match?match[1].toLowerCase():'';
+  }
   function splitAddress(value) {
     const text = cleanText(value);
+    const building=standaloneBuilding(text);
+    if(building)return {base:'building '+building,unitKey:''};
     const unit = /(?:#|\b(?:suite|ste|unit|apt|apartment|room|rm|floor|fl(?![.\s:#-]*(?:rout|route|rt|rte|hwy|highway|road|rd|sr|cr)[.\s-]*\d)|building|bldg)\b[.\s:#-]*)\s*([a-z0-9]+(?:-[a-z0-9]+)?)/i.exec(text);
     const base = (unit ? text.slice(0, unit.index) : text).trim();
     return { base, unitKey: unit ? normalizeWords(unit[1]) : '' };
@@ -91,6 +97,8 @@
     return {houseNumber, street};
   }
   function addressWildcard(value) {
+    const building=standaloneBuilding(value);
+    if(building)return '*'+building+'*';
     const {houseNumber,street,numberedRoute} = addressSearchParts(value);
     if (!street.length) return '';
     const house = houseNumber ? houseNumber.slice(0, Math.max(1,houseNumber.length-(houseNumber.length>4?2:1))) : '';
@@ -211,7 +219,7 @@
     });
   }
 
-  const includesAddress = (a, b) => a && b && (a === b || a.includes(b) || b.includes(a));
+  const includesAddress = (a, b) => a && b && (a === b || (!/^building \d/.test(a) && !/^building \d/.test(b) && (a.includes(b) || b.includes(a))));
 
   function classify(source, other) {
     const rules = [];
