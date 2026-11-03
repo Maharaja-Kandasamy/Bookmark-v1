@@ -129,10 +129,64 @@
     return matches.length === 1 ? {button:matches[0]} : {error:matches.length?'Multiple Search buttons found':'Visible Search button not found'};
   }
 
+  function beginSearchSession(profile = 'storeView') {
+    const snapshot=captureFields(profile);
+    try {
+      const cleared=clearSearchFilters(snapshot);
+      if(!cleared.ok){restoreFields(snapshot);return cleared;}
+      return {ok:true,snapshot,profile,closed:false};
+    }catch{
+      restoreFields(snapshot);
+      return {ok:false,diagnostic:'The initial search filters could not be prepared. Review the form before retrying.'};
+    }
+  }
+
+  function endSearchSession(session) {
+    if(!session || session.closed)return {ok:true};
+    session.closed=true;
+    return restoreFields(session.snapshot);
+  }
+
+  function selectSearchFilters(dialog,controls,profile = 'storeView') {
+    if(findDialog()!==dialog)return {ok:false,diagnostic:'Manual Match dialog changed'};
+    const fields=captureSearchFields(dialog,profile);
+    const wanted=new Set(controls.map(control=>control.checkbox));
+    try {
+      // Keep shared filters selected; remove only filters not used by the next query.
+      for(const {checkbox} of fields){
+        if(!checkbox?.checked || wanted.has(checkbox))continue;
+        if(checkbox.disabled)return {ok:false,diagnostic:'A previous search filter could not be changed'};
+        checkbox.click();
+        if(checkbox.checked)return {ok:false,diagnostic:'A previous search filter stayed selected'};
+      }
+    } finally {
+      fields.forEach(({input,value})=>{if(input?.isConnected && input.value!==value)setInputValue(input,value);});
+    }
+    for(const {checkbox,input,value} of controls){
+      if(!checkbox || !input || checkbox.isConnected===false || input.isConnected===false)return {ok:false,diagnostic:'A required search filter changed. Retry the search.'};
+      if(!checkbox.checked)checkbox.click();
+      if(String(input.value)!==String(value))setInputValue(input,value);
+      if(!checkbox.checked || String(input.value).trim()!==String(value).trim())return {ok:false,diagnostic:'The required search filter or value was not accepted'};
+    }
+    if(fields.some(({checkbox})=>checkbox?.checked && !wanted.has(checkbox)))return {ok:false,diagnostic:'An unrelated search filter stayed selected'};
+    return {ok:true};
+  }
+
   function prepareQuery(query, options = {}) {
     const dialog = findDialog();
     if (!dialog) return { ok: false, diagnostic: 'Manual Match dialog not open' };
     const profile = options.profile === 'retailSync' ? 'retailSync' : 'storeView';
+    if(options.session){
+      if(options.session.closed || options.session.snapshot.dialog!==dialog)return {ok:false,diagnostic:'The search session changed. Retry the search.'};
+      const controls=[];
+      for(const control of controlsForQuery(query,profile)){
+        const found=discoverControl(dialog,control.key,profile);
+        if(!found.input || !found.checkbox)return {ok:false,diagnostic:`Required ${control.key} control not found`};
+        controls.push({...found,value:control.value});
+      }
+      const selected=selectSearchFilters(dialog,controls,profile);
+      return selected.ok?{ok:true,dialog,controlsVerified:true}:selected;
+    }
     const snapshot = options.fieldSnapshot || {dialog,fields:captureSearchFields(dialog,profile)};
     const cleared = clearSearchFilters(snapshot);
     if (!cleared.ok) return cleared;
@@ -168,7 +222,7 @@
 
   async function executeSearch(query, options = {}) {
     if (options.isCurrent && !options.isCurrent()) return {status:'incomplete',rows:[],diagnostic:'Source record changed'};
-    const prepared = prepareQuery(query, { profile:options.profile,fieldSnapshot:options.fieldSnapshot });
+    const prepared = prepareQuery(query, { profile:options.profile,fieldSnapshot:options.fieldSnapshot,session:options.session });
     if (!prepared.ok) return { status: 'incomplete', rows: [], diagnostic: prepared.diagnostic };
     const dialog = prepared.dialog;
     const foundSearch = findSearchButton(dialog);
@@ -263,14 +317,14 @@
   async function execute(query,options={}) {
     if(options.signal?.aborted)return {status:'incomplete',rows:[],diagnostic:'Search cancelled'};
     let snapshot,result;
-    try {snapshot=captureFields(options.profile);result=await executeSearch(query,{...options,fieldSnapshot:snapshot});}
+    try {if(!options.session)snapshot=captureFields(options.profile);result=await executeSearch(query,{...options,fieldSnapshot:snapshot});}
     catch(error){result={status:'incomplete',rows:[],diagnostic:'Search could not finish: '+String(error?.message || 'The page changed').split(/[\r\n]/)[0].slice(0,180)};}
     finally {
-      try {const restored=restoreFields(snapshot);if(restored?.ok===false)result={...result,status:'incomplete',diagnostic:restored.diagnostic};}
+      try {const restored=options.session?{ok:true}:restoreFields(snapshot);if(restored?.ok===false)result={...result,status:'incomplete',diagnostic:restored.diagnostic};}
       catch {result={...result,status:'incomplete',diagnostic:'Search stopped because the previous field values could not be restored. Review the form before retrying.'};}
     }
     return result;
   }
 
-  return { FIELD_CONTROLS, PROFILE_CONTROLS, controlsForQuery, rowFromCells, findDialog, controlMatchesField, discoverControl, prepareQuery, captureSearchFields, clearSearchFilters, findSearchButton, extractRows, resultObservationRoot, isResultActivity, submitAndWait, setInputValue, captureFields, restoreFields, execute };
+  return { FIELD_CONTROLS, PROFILE_CONTROLS, controlsForQuery, rowFromCells, findDialog, controlMatchesField, discoverControl, prepareQuery, beginSearchSession, endSearchSession, selectSearchFilters, captureSearchFields, clearSearchFilters, findSearchButton, extractRows, resultObservationRoot, isResultActivity, submitAndWait, setInputValue, captureFields, restoreFields, execute };
 });

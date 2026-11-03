@@ -35,3 +35,26 @@ test('restoration attempts all field values even when a checkbox fails',()=>{
  const result=A.restoreFields({dialog,fields:[{checkbox:broken,checked:true,input:one,value:'first saved field'},{input:two,value:'second saved field'}]});
  assert.equal(result.ok,false);assert.equal(one.value,'first saved field');assert.equal(two.value,'second saved field');
 });
+
+
+test('a button-run session clears once and keeps the shared Address checkbox selected',()=>{
+ const {A,dialog}=setup();const clicks=[];
+ const create=name=>{
+  const input={value:'original '+name,isConnected:true,dispatchEvent(){},closest:selector=>selector.startsWith('table')?null:group};
+  const checkbox={checked:true,isConnected:true,click(){this.checked=!this.checked;clicks.push({name,checked:this.checked});if(!this.checked)input.value='';}};
+  const group={querySelectorAll:()=>[checkbox]};return {name,input,checkbox};
+ };
+ const fields=['Address','City','State','ZIP'].map(create);
+ dialog.querySelectorAll=()=>fields.map(f=>f.input);dialog.querySelector=()=>null;
+ const session=A.beginSearchSession();assert.equal(session.ok,true);assert.equal(clicks.length,4);
+ const address=fields[0];
+ for(const location of fields.slice(1)){
+  const selected=A.selectSearchFilters(dialog,[{...address,value:'512*pea*'},{...location,value:location.name}],session.profile);
+  assert.equal(selected.ok,true);assert.equal(address.checkbox.checked,true);
+ }
+ assert.equal(clicks.filter(c=>c.name==='Address'&&!c.checked).length,1);
+ assert.equal(clicks.filter(c=>c.name==='Address'&&c.checked).length,1);
+ assert.equal(A.endSearchSession(session).ok,true);
+ fields.forEach(f=>{assert.equal(f.input.value,'original '+f.name);assert.equal(f.checkbox.checked,true);});
+ const count=clicks.length;A.endSearchSession(session);assert.equal(clicks.length,count);
+});

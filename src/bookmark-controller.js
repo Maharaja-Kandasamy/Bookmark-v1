@@ -10,6 +10,7 @@
     const Runner = root.PickerRunController;
     let runner = null;
     let runBusy = false;
+    let searchSession = null;
     let extraction = null;
     let destroyed = false;
     let revision = 0;
@@ -100,8 +101,13 @@
         store.set(result);
         return result;
       }
+      searchSession=Adapter.beginSearchSession?.(current.profile) || null;
+      if(searchSession?.ok===false){
+        const result={status:'incomplete',observations:[],results:[],activeQuery:null,diagnostic:searchSession.diagnostic};
+        store.set(result);return result;
+      }
       runner = Runner.createRunController({
-        adapter: (query, runOptions) => Adapter.execute(query, { ...runOptions, timeoutMs: queryTimeoutMs, stableMs, profile: current.profile, isCurrent:() => { refresh(); return !destroyed && revision === runRevision; } }),
+        adapter: (query, runOptions) => Adapter.execute(query, { ...runOptions, session:searchSession, timeoutMs: queryTimeoutMs, stableMs, profile: current.profile, isCurrent:() => { refresh(); return !destroyed && revision === runRevision; } }),
         onState: state => { if (!destroyed && runRevision === revision) store.set(state.status === 'completed' ? {...state,status:'running'} : state); },
         queryTimeoutMs,
         runTimeoutMs: plan.length * queryTimeoutMs + Math.max(0,plan.length-1) * safetyDelayMs + 5000,
@@ -124,7 +130,7 @@
         store.set({status:'waiting',results,tdIds,activeQuery:{type:'links',label:`Reviewing links for the top ${tdIds.length} matches...`},progress:plan.length,total:plan.length+1});
         try {
           if(await waitBeforeFinalSearch(aborter.signal)){
-            linksSearch = await root.PickerBookmarkLinks.execute(tdIds,{profile:current.profile,signal:aborter.signal,timeoutMs:queryTimeoutMs,stableMs,beforeSubmit:waitForContinue,
+            linksSearch = await root.PickerBookmarkLinks.execute(tdIds,{profile:current.profile,session:searchSession,signal:aborter.signal,timeoutMs:queryTimeoutMs,stableMs,beforeSubmit:waitForContinue,
               isCurrent:() => { refresh(); return !destroyed && revision === runRevision; }});
           }else linksSearch = {status:'cancelled',diagnostic:'Search stopped before the final TD request'};
           await waitForContinue();
@@ -147,18 +153,29 @@
       if (runBusy) return {status:'busy',diagnostic:'A search is already running. Use Pause or Stop before starting another.'};
       runBusy=true;
       let runRevision=revision;
+      let completedResult;
       try {
         const pending=runChecks(group);
         runRevision=revision;
-        return await pending;
+        completedResult=await pending;return completedResult;
       } catch (error) {
         completionAborter?.abort(); runner?.cancel?.();
         if(destroyed || revision!==runRevision)return {status:'cancelled',observations:[],results:[]};
         const current=store.get() || {};
         const message=String(error?.message || 'Unexpected search failure').split(/[\r\n]/)[0].slice(0,180);
         const result={status:'incomplete',observations:current.observations || [],results:current.results || [],activeQuery:null,diagnostic:`Search stopped safely: ${message}. Retry the search.`};
-        store.set(result); return result;
-      } finally { clearPause(); runner=null; completionAborter=null; runBusy=false; }
+        completedResult=result;store.set(result); return result;
+      } finally {
+        let restored;
+        try{restored=Adapter.endSearchSession?.(searchSession);}catch{restored={ok:false,diagnostic:'Some previous search fields could not be restored. Review the form.'};}
+        searchSession=null;
+        if(restored?.ok===false && !destroyed && revision===runRevision){
+          const patch={status:'incomplete',activeQuery:null,diagnostic:restored.diagnostic};
+          if(completedResult)Object.assign(completedResult,patch);
+          store.set(patch);
+        }
+        clearPause();runner=null;completionAborter=null;runBusy=false;
+      }
     }
 
     function cancel() { clearPause(); runner?.cancel?.(); completionAborter?.abort(); }

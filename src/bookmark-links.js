@@ -32,7 +32,7 @@
     if (!ids.length || ids.length > 5 || ids.some(id => !/^\d+$/.test(id))) return {status:'incomplete',diagnostic:'No valid top TD IDs available',value};
     const dialog = Adapter.findDialog();
     if (!dialog) return {status:'incomplete',diagnostic:'Manual Match dialog not open for ranked TD search',value};
-    const snapshot = Adapter.captureFields(options.profile);
+    const snapshot = options.session ? null : Adapter.captureFields(options.profile);
     const current = () => !options.signal?.aborted && (!options.isCurrent || options.isCurrent()) && Adapter.findDialog() === dialog;
     try {
       const field = findTdField(dialog);
@@ -42,11 +42,17 @@
       if (search.error) return {status:'incomplete',diagnostic:search.error,value};
       await options.beforeSubmit?.();
       if (!current()) return {status:'incomplete',diagnostic:'Ranked TD search cancelled or source changed',value};
-      const cleared = Adapter.clearSearchFilters(snapshot);
-      if (!cleared.ok) return {status:'incomplete',diagnostic:cleared.diagnostic,value};
-      if (!field.checkbox.checked) field.checkbox.click();
-      if (!field.checkbox.checked) return {status:'incomplete',diagnostic:'TDLINX_STORE_CODE checkbox did not stay selected',value};
-      Adapter.setInputValue(field.input,value);
+      if(options.session){
+        if(options.session.closed || options.session.snapshot.dialog!==dialog)return {status:'incomplete',diagnostic:'The search session changed',value};
+        const selected=Adapter.selectSearchFilters(dialog,[{...field,value}],options.profile);
+        if(!selected.ok)return {status:'incomplete',diagnostic:selected.diagnostic,value};
+      }else{
+        const cleared = Adapter.clearSearchFilters(snapshot);
+        if (!cleared.ok) return {status:'incomplete',diagnostic:cleared.diagnostic,value};
+        if (!field.checkbox.checked) field.checkbox.click();
+        if (!field.checkbox.checked) return {status:'incomplete',diagnostic:'TDLINX_STORE_CODE checkbox did not stay selected',value};
+        Adapter.setInputValue(field.input,value);
+      }
       if (field.input.value !== value) return {status:'incomplete',diagnostic:'TD list was not accepted by TDLINX_STORE_CODE',value};
       if (!current()) return {status:'incomplete',diagnostic:'Ranked TD search cancelled or source changed',value};
       const result = await Adapter.submitAndWait(dialog,search.button,options);
@@ -54,7 +60,7 @@
     } catch (error) {
       return {status:'incomplete',diagnostic:`Ranked TD search failed: ${error.message}`,value};
     } finally {
-      if (!options.isCurrent || options.isCurrent()) {
+      if (!options.session && (!options.isCurrent || options.isCurrent())) {
         const restored=Adapter.restoreFields(snapshot);
         if(restored?.ok===false)return {status:'incomplete',value,diagnostic:restored.diagnostic};
       }

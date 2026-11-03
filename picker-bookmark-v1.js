@@ -707,10 +707,64 @@
     return matches.length === 1 ? {button:matches[0]} : {error:matches.length?'Multiple Search buttons found':'Visible Search button not found'};
   }
 
+  function beginSearchSession(profile = 'storeView') {
+    const snapshot=captureFields(profile);
+    try {
+      const cleared=clearSearchFilters(snapshot);
+      if(!cleared.ok){restoreFields(snapshot);return cleared;}
+      return {ok:true,snapshot,profile,closed:false};
+    }catch{
+      restoreFields(snapshot);
+      return {ok:false,diagnostic:'The initial search filters could not be prepared. Review the form before retrying.'};
+    }
+  }
+
+  function endSearchSession(session) {
+    if(!session || session.closed)return {ok:true};
+    session.closed=true;
+    return restoreFields(session.snapshot);
+  }
+
+  function selectSearchFilters(dialog,controls,profile = 'storeView') {
+    if(findDialog()!==dialog)return {ok:false,diagnostic:'Manual Match dialog changed'};
+    const fields=captureSearchFields(dialog,profile);
+    const wanted=new Set(controls.map(control=>control.checkbox));
+    try {
+      // Keep shared filters selected; remove only filters not used by the next query.
+      for(const {checkbox} of fields){
+        if(!checkbox?.checked || wanted.has(checkbox))continue;
+        if(checkbox.disabled)return {ok:false,diagnostic:'A previous search filter could not be changed'};
+        checkbox.click();
+        if(checkbox.checked)return {ok:false,diagnostic:'A previous search filter stayed selected'};
+      }
+    } finally {
+      fields.forEach(({input,value})=>{if(input?.isConnected && input.value!==value)setInputValue(input,value);});
+    }
+    for(const {checkbox,input,value} of controls){
+      if(!checkbox || !input || checkbox.isConnected===false || input.isConnected===false)return {ok:false,diagnostic:'A required search filter changed. Retry the search.'};
+      if(!checkbox.checked)checkbox.click();
+      if(String(input.value)!==String(value))setInputValue(input,value);
+      if(!checkbox.checked || String(input.value).trim()!==String(value).trim())return {ok:false,diagnostic:'The required search filter or value was not accepted'};
+    }
+    if(fields.some(({checkbox})=>checkbox?.checked && !wanted.has(checkbox)))return {ok:false,diagnostic:'An unrelated search filter stayed selected'};
+    return {ok:true};
+  }
+
   function prepareQuery(query, options = {}) {
     const dialog = findDialog();
     if (!dialog) return { ok: false, diagnostic: 'Manual Match dialog not open' };
     const profile = options.profile === 'retailSync' ? 'retailSync' : 'storeView';
+    if(options.session){
+      if(options.session.closed || options.session.snapshot.dialog!==dialog)return {ok:false,diagnostic:'The search session changed. Retry the search.'};
+      const controls=[];
+      for(const control of controlsForQuery(query,profile)){
+        const found=discoverControl(dialog,control.key,profile);
+        if(!found.input || !found.checkbox)return {ok:false,diagnostic:`Required ${control.key} control not found`};
+        controls.push({...found,value:control.value});
+      }
+      const selected=selectSearchFilters(dialog,controls,profile);
+      return selected.ok?{ok:true,dialog,controlsVerified:true}:selected;
+    }
     const snapshot = options.fieldSnapshot || {dialog,fields:captureSearchFields(dialog,profile)};
     const cleared = clearSearchFilters(snapshot);
     if (!cleared.ok) return cleared;
@@ -746,7 +800,7 @@
 
   async function executeSearch(query, options = {}) {
     if (options.isCurrent && !options.isCurrent()) return {status:'incomplete',rows:[],diagnostic:'Source record changed'};
-    const prepared = prepareQuery(query, { profile:options.profile,fieldSnapshot:options.fieldSnapshot });
+    const prepared = prepareQuery(query, { profile:options.profile,fieldSnapshot:options.fieldSnapshot,session:options.session });
     if (!prepared.ok) return { status: 'incomplete', rows: [], diagnostic: prepared.diagnostic };
     const dialog = prepared.dialog;
     const foundSearch = findSearchButton(dialog);
@@ -841,16 +895,16 @@
   async function execute(query,options={}) {
     if(options.signal?.aborted)return {status:'incomplete',rows:[],diagnostic:'Search cancelled'};
     let snapshot,result;
-    try {snapshot=captureFields(options.profile);result=await executeSearch(query,{...options,fieldSnapshot:snapshot});}
+    try {if(!options.session)snapshot=captureFields(options.profile);result=await executeSearch(query,{...options,fieldSnapshot:snapshot});}
     catch(error){result={status:'incomplete',rows:[],diagnostic:'Search could not finish: '+String(error?.message || 'The page changed').split(/[\r\n]/)[0].slice(0,180)};}
     finally {
-      try {const restored=restoreFields(snapshot);if(restored?.ok===false)result={...result,status:'incomplete',diagnostic:restored.diagnostic};}
+      try {const restored=options.session?{ok:true}:restoreFields(snapshot);if(restored?.ok===false)result={...result,status:'incomplete',diagnostic:restored.diagnostic};}
       catch {result={...result,status:'incomplete',diagnostic:'Search stopped because the previous field values could not be restored. Review the form before retrying.'};}
     }
     return result;
   }
 
-  return { FIELD_CONTROLS, PROFILE_CONTROLS, controlsForQuery, rowFromCells, findDialog, controlMatchesField, discoverControl, prepareQuery, captureSearchFields, clearSearchFilters, findSearchButton, extractRows, resultObservationRoot, isResultActivity, submitAndWait, setInputValue, captureFields, restoreFields, execute };
+  return { FIELD_CONTROLS, PROFILE_CONTROLS, controlsForQuery, rowFromCells, findDialog, controlMatchesField, discoverControl, prepareQuery, beginSearchSession, endSearchSession, selectSearchFilters, captureSearchFields, clearSearchFilters, findSearchButton, extractRows, resultObservationRoot, isResultActivity, submitAndWait, setInputValue, captureFields, restoreFields, execute };
 });
 (function(root,factory){const api=factory();if(typeof module==='object'&&module.exports)module.exports=api;if(root)root.PickerBotLayout=api;})(typeof globalThis!=='undefined'?globalThis:this,function(){
   const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
@@ -987,7 +1041,7 @@
     if (!ids.length || ids.length > 5 || ids.some(id => !/^\d+$/.test(id))) return {status:'incomplete',diagnostic:'No valid top TD IDs available',value};
     const dialog = Adapter.findDialog();
     if (!dialog) return {status:'incomplete',diagnostic:'Manual Match dialog not open for ranked TD search',value};
-    const snapshot = Adapter.captureFields(options.profile);
+    const snapshot = options.session ? null : Adapter.captureFields(options.profile);
     const current = () => !options.signal?.aborted && (!options.isCurrent || options.isCurrent()) && Adapter.findDialog() === dialog;
     try {
       const field = findTdField(dialog);
@@ -997,11 +1051,17 @@
       if (search.error) return {status:'incomplete',diagnostic:search.error,value};
       await options.beforeSubmit?.();
       if (!current()) return {status:'incomplete',diagnostic:'Ranked TD search cancelled or source changed',value};
-      const cleared = Adapter.clearSearchFilters(snapshot);
-      if (!cleared.ok) return {status:'incomplete',diagnostic:cleared.diagnostic,value};
-      if (!field.checkbox.checked) field.checkbox.click();
-      if (!field.checkbox.checked) return {status:'incomplete',diagnostic:'TDLINX_STORE_CODE checkbox did not stay selected',value};
-      Adapter.setInputValue(field.input,value);
+      if(options.session){
+        if(options.session.closed || options.session.snapshot.dialog!==dialog)return {status:'incomplete',diagnostic:'The search session changed',value};
+        const selected=Adapter.selectSearchFilters(dialog,[{...field,value}],options.profile);
+        if(!selected.ok)return {status:'incomplete',diagnostic:selected.diagnostic,value};
+      }else{
+        const cleared = Adapter.clearSearchFilters(snapshot);
+        if (!cleared.ok) return {status:'incomplete',diagnostic:cleared.diagnostic,value};
+        if (!field.checkbox.checked) field.checkbox.click();
+        if (!field.checkbox.checked) return {status:'incomplete',diagnostic:'TDLINX_STORE_CODE checkbox did not stay selected',value};
+        Adapter.setInputValue(field.input,value);
+      }
       if (field.input.value !== value) return {status:'incomplete',diagnostic:'TD list was not accepted by TDLINX_STORE_CODE',value};
       if (!current()) return {status:'incomplete',diagnostic:'Ranked TD search cancelled or source changed',value};
       const result = await Adapter.submitAndWait(dialog,search.button,options);
@@ -1009,7 +1069,7 @@
     } catch (error) {
       return {status:'incomplete',diagnostic:`Ranked TD search failed: ${error.message}`,value};
     } finally {
-      if (!options.isCurrent || options.isCurrent()) {
+      if (!options.session && (!options.isCurrent || options.isCurrent())) {
         const restored=Adapter.restoreFields(snapshot);
         if(restored?.ok===false)return {status:'incomplete',value,diagnostic:restored.diagnostic};
       }
@@ -1029,6 +1089,7 @@
     const Runner = root.PickerRunController;
     let runner = null;
     let runBusy = false;
+    let searchSession = null;
     let extraction = null;
     let destroyed = false;
     let revision = 0;
@@ -1119,8 +1180,13 @@
         store.set(result);
         return result;
       }
+      searchSession=Adapter.beginSearchSession?.(current.profile) || null;
+      if(searchSession?.ok===false){
+        const result={status:'incomplete',observations:[],results:[],activeQuery:null,diagnostic:searchSession.diagnostic};
+        store.set(result);return result;
+      }
       runner = Runner.createRunController({
-        adapter: (query, runOptions) => Adapter.execute(query, { ...runOptions, timeoutMs: queryTimeoutMs, stableMs, profile: current.profile, isCurrent:() => { refresh(); return !destroyed && revision === runRevision; } }),
+        adapter: (query, runOptions) => Adapter.execute(query, { ...runOptions, session:searchSession, timeoutMs: queryTimeoutMs, stableMs, profile: current.profile, isCurrent:() => { refresh(); return !destroyed && revision === runRevision; } }),
         onState: state => { if (!destroyed && runRevision === revision) store.set(state.status === 'completed' ? {...state,status:'running'} : state); },
         queryTimeoutMs,
         runTimeoutMs: plan.length * queryTimeoutMs + Math.max(0,plan.length-1) * safetyDelayMs + 5000,
@@ -1143,7 +1209,7 @@
         store.set({status:'waiting',results,tdIds,activeQuery:{type:'links',label:`Reviewing links for the top ${tdIds.length} matches...`},progress:plan.length,total:plan.length+1});
         try {
           if(await waitBeforeFinalSearch(aborter.signal)){
-            linksSearch = await root.PickerBookmarkLinks.execute(tdIds,{profile:current.profile,signal:aborter.signal,timeoutMs:queryTimeoutMs,stableMs,beforeSubmit:waitForContinue,
+            linksSearch = await root.PickerBookmarkLinks.execute(tdIds,{profile:current.profile,session:searchSession,signal:aborter.signal,timeoutMs:queryTimeoutMs,stableMs,beforeSubmit:waitForContinue,
               isCurrent:() => { refresh(); return !destroyed && revision === runRevision; }});
           }else linksSearch = {status:'cancelled',diagnostic:'Search stopped before the final TD request'};
           await waitForContinue();
@@ -1166,18 +1232,29 @@
       if (runBusy) return {status:'busy',diagnostic:'A search is already running. Use Pause or Stop before starting another.'};
       runBusy=true;
       let runRevision=revision;
+      let completedResult;
       try {
         const pending=runChecks(group);
         runRevision=revision;
-        return await pending;
+        completedResult=await pending;return completedResult;
       } catch (error) {
         completionAborter?.abort(); runner?.cancel?.();
         if(destroyed || revision!==runRevision)return {status:'cancelled',observations:[],results:[]};
         const current=store.get() || {};
         const message=String(error?.message || 'Unexpected search failure').split(/[\r\n]/)[0].slice(0,180);
         const result={status:'incomplete',observations:current.observations || [],results:current.results || [],activeQuery:null,diagnostic:`Search stopped safely: ${message}. Retry the search.`};
-        store.set(result); return result;
-      } finally { clearPause(); runner=null; completionAborter=null; runBusy=false; }
+        completedResult=result;store.set(result); return result;
+      } finally {
+        let restored;
+        try{restored=Adapter.endSearchSession?.(searchSession);}catch{restored={ok:false,diagnostic:'Some previous search fields could not be restored. Review the form.'};}
+        searchSession=null;
+        if(restored?.ok===false && !destroyed && revision===runRevision){
+          const patch={status:'incomplete',activeQuery:null,diagnostic:restored.diagnostic};
+          if(completedResult)Object.assign(completedResult,patch);
+          store.set(patch);
+        }
+        clearPause();runner=null;completionAborter=null;runBusy=false;
+      }
     }
 
     function cancel() { clearPause(); runner?.cancel?.(); completionAborter?.abort(); }

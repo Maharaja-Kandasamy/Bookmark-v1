@@ -297,3 +297,19 @@ test('Stop during the final TD pause cancels the pending request immediately',as
  const pending=controller.run();await new Promise(resolve=>setTimeout(resolve,10));assert.equal(store.get().activeQuery.type,'links');const start=Date.now();controller.cancel();
  assert.equal((await pending).status,'cancelled');assert.equal(submitted,0);assert.ok(Date.now()-start<300);
 });
+
+
+test('one click owns one filter session across all its queries',async()=>{
+ let begins=0,ends=0,queries=0;const session={ok:true,snapshot:{},closed:false};
+ const {controller}=setup({PickerManualMatchAdapter:{
+  beginSearchSession:()=>{begins++;return session;},endSearchSession:value=>{assert.equal(value,session);ends++;return {ok:true};},
+  execute:async(_query,options)=>{assert.equal(options.session,session);queries++;return {status:'complete',rows:[]};}
+ }});
+ assert.equal((await controller.run()).status,'completed');assert.equal(begins,1);assert.equal(ends,1);assert.equal(queries,2);
+});
+
+test('an interrupted run still closes its filter session exactly once',async()=>{
+ let ends=0;const session={ok:true,snapshot:{}};
+ const {controller}=setup({PickerManualMatchAdapter:{beginSearchSession:()=>session,endSearchSession:()=>{ends++;return {ok:true};},execute:async()=>{throw Error('Host changed');}}});
+ assert.equal((await controller.run()).status,'incomplete');assert.equal(ends,1);
+});
