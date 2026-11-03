@@ -44,3 +44,19 @@ test('double-start returns a busy result instead of rejecting',async()=>{
  let release;const runner=createRunController({adapter:()=>new Promise(resolve=>{release=resolve;}),safetyDelayMs:0});
  const first=runner.start([{id:'one'}]);await tick();assert.equal((await runner.start([{id:'two'}])).status,'busy');release({status:'complete',rows:[]});await first;
 });
+
+
+test('safe pacing stops on an unfinished response instead of submitting another query',async()=>{
+ const calls=[];
+ const runner=createRunController({adapter:async query=>{calls.push(query.id);return {status:'incomplete',rows:[],diagnostic:'Still loading'};},stopOnIncomplete:true,safetyDelayMs:0});
+ const result=await runner.start([{id:'one'},{id:'two'}]);
+ assert.deepEqual(calls,['one']);assert.equal(result.status,'incomplete');assert.match(result.diagnostic,/No further searches were submitted/);
+});
+
+test('the next search waits for completion and the full inter-search pause',async()=>{
+ const calls=[];let release;const started=Date.now();
+ const runner=createRunController({adapter:query=>{calls.push({id:query.id,at:Date.now()});return query.id==='one'?new Promise(resolve=>{release=resolve;}):Promise.resolve({status:'complete',rows:[]});},safetyDelayMs:45,stopOnIncomplete:true});
+ const pending=runner.start([{id:'one'},{id:'two'}]);await tick();await new Promise(resolve=>setTimeout(resolve,25));assert.equal(calls.length,1);
+ const finishedFirst=Date.now();release({status:'complete',rows:[]});await pending;
+ assert.ok(calls[1].at-finishedFirst>=40);assert.ok(calls[1].at-started>=60);
+});

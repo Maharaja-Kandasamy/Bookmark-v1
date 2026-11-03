@@ -368,12 +368,14 @@
           currentAborter = null;
           observations.push({ queryId: query.id, query, ...result });
           publish({ status: 'running', progress: index + 1, total: plan.length, observations, progressText: `Search ${index + 1} of ${plan.length}` });
+          if(options.stopOnIncomplete && result.status !== 'complete') break;
           if (index < plan.length - 1 && !cancelled) await wait(safetyDelayMs);
         }
         await awaitResume();
         const incomplete = observations.some(item => item.status !== 'complete') || observations.length < plan.length;
         const status = cancelled ? 'cancelled' : incomplete ? 'incomplete' : 'completed';
-        const diagnostic = cancelled ? 'Search stopped.' : incomplete ? (observations.find(item => item.status !== 'complete')?.diagnostic || 'Not all checks finished. Retry the incomplete searches.') : '';
+        const failure = observations.find(item => item.status !== 'complete');
+        const diagnostic = cancelled ? 'Search stopped.' : incomplete ? ((failure?.diagnostic || 'Not all checks finished. Retry the incomplete searches.') + (options.stopOnIncomplete && failure ? ' No further searches were submitted. Review the page before retrying.' : '')) : '';
         const result = { status, observations, progress: observations.length, total: plan.length, diagnostic };
         publish(result);
         return result;
@@ -756,7 +758,7 @@
   }
 
   function submitAndWait(dialog,search,options={}) {
-    const timeoutMs=options.timeoutMs || 30000,stableMs=options.stableMs || 600;
+    const timeoutMs=options.timeoutMs || 120000,stableMs=options.stableMs || 1500;
     if(options.signal?.aborted)return Promise.resolve({status:'incomplete',rows:[],diagnostic:'Search cancelled'});
     return new Promise(resolve => {
       let finished=false,timer,deadline,pending,observer,before,lastSignature,stableSince=0,sawMutation=false,sawBusy=false,dirty=true;
@@ -1033,6 +1035,14 @@
     let completionAborter = null;
     let paused = false;
     let continueResolve = null;
+    const queryTimeoutMs = 120000, stableMs = 1500, safetyDelayMs = 900;
+    const waitBeforeFinalSearch = signal => new Promise(resolve => {
+      if(signal.aborted){resolve(false);return;}
+      const finish = ready => {clearTimeout(timer);signal.removeEventListener('abort',onAbort);resolve(ready);};
+      const onAbort = () => finish(false);
+      const timer = setTimeout(() => finish(true),safetyDelayMs);
+      signal.addEventListener('abort',onAbort,{once:true});
+    });
     const waitForContinue = () => paused ? new Promise(resolve => { continueResolve = resolve; }) : Promise.resolve();
     function clearPause() { paused = false; continueResolve?.(); continueResolve = null; }
     const signature = found => JSON.stringify([found?.profile, found?.source || null]);
@@ -1110,11 +1120,12 @@
         return result;
       }
       runner = Runner.createRunController({
-        adapter: (query, runOptions) => Adapter.execute(query, { ...runOptions, timeoutMs: 30000, stableMs: 600, profile: current.profile, isCurrent:() => { refresh(); return !destroyed && revision === runRevision; } }),
+        adapter: (query, runOptions) => Adapter.execute(query, { ...runOptions, timeoutMs: queryTimeoutMs, stableMs, profile: current.profile, isCurrent:() => { refresh(); return !destroyed && revision === runRevision; } }),
         onState: state => { if (!destroyed && runRevision === revision) store.set(state.status === 'completed' ? {...state,status:'running'} : state); },
-        queryTimeoutMs: 30000,
-        runTimeoutMs: 180000,
-        safetyDelayMs: 150
+        queryTimeoutMs,
+        runTimeoutMs: plan.length * queryTimeoutMs + Math.max(0,plan.length-1) * safetyDelayMs + 5000,
+        safetyDelayMs,
+        stopOnIncomplete: true
       });
       const runResult = await runner.start(plan);
       refresh();
@@ -1131,8 +1142,10 @@
         completionAborter = aborter;
         store.set({status:'waiting',results,tdIds,activeQuery:{type:'links',label:`Reviewing links for the top ${tdIds.length} matches...`},progress:plan.length,total:plan.length+1});
         try {
-          linksSearch = await root.PickerBookmarkLinks.execute(tdIds,{profile:current.profile,signal:aborter.signal,timeoutMs:30000,stableMs:600,beforeSubmit:waitForContinue,
-            isCurrent:() => { refresh(); return !destroyed && revision === runRevision; }});
+          if(await waitBeforeFinalSearch(aborter.signal)){
+            linksSearch = await root.PickerBookmarkLinks.execute(tdIds,{profile:current.profile,signal:aborter.signal,timeoutMs:queryTimeoutMs,stableMs,beforeSubmit:waitForContinue,
+              isCurrent:() => { refresh(); return !destroyed && revision === runRevision; }});
+          }else linksSearch = {status:'cancelled',diagnostic:'Search stopped before the final TD request'};
           await waitForContinue();
         } finally { if(completionAborter === aborter)completionAborter = null; }
         if (aborter.signal.aborted && linksSearch) linksSearch = {...linksSearch,status:'cancelled'};

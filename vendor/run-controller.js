@@ -53,12 +53,14 @@
           currentAborter = null;
           observations.push({ queryId: query.id, query, ...result });
           publish({ status: 'running', progress: index + 1, total: plan.length, observations, progressText: `Search ${index + 1} of ${plan.length}` });
+          if(options.stopOnIncomplete && result.status !== 'complete') break;
           if (index < plan.length - 1 && !cancelled) await wait(safetyDelayMs);
         }
         await awaitResume();
         const incomplete = observations.some(item => item.status !== 'complete') || observations.length < plan.length;
         const status = cancelled ? 'cancelled' : incomplete ? 'incomplete' : 'completed';
-        const diagnostic = cancelled ? 'Search stopped.' : incomplete ? (observations.find(item => item.status !== 'complete')?.diagnostic || 'Not all checks finished. Retry the incomplete searches.') : '';
+        const failure = observations.find(item => item.status !== 'complete');
+        const diagnostic = cancelled ? 'Search stopped.' : incomplete ? ((failure?.diagnostic || 'Not all checks finished. Retry the incomplete searches.') + (options.stopOnIncomplete && failure ? ' No further searches were submitted. Review the page before retrying.' : '')) : '';
         const result = { status, observations, progress: observations.length, total: plan.length, diagnostic };
         publish(result);
         return result;

@@ -281,3 +281,19 @@ test('observations from an unrelated query cannot enter current rankings',async(
  const {controller}=setup({PickerRunController:{createRunController:()=>({start:async()=>({status:'completed',observations:[{queryId:'old-query',status:'complete',rows:[{slId:'9999999'}]},{queryId:'one',status:'complete',rows:[{slId:'0000001'}]}]}),isActive:()=>false,cancel(){}})}});
  const result=await controller.run();assert.deepEqual(Array.from(result.results,row=>row.slId),['0000001']);
 });
+
+
+test('the production controller uses conservative loading and pacing settings',async()=>{
+ const {controller}=setup({PickerRunController:{createRunController:options=>{
+  assert.equal(options.queryTimeoutMs,120000);assert.equal(options.safetyDelayMs,900);assert.equal(options.stopOnIncomplete,true);assert.ok(options.runTimeoutMs>=240900);
+  return {start:async()=>({status:'completed',observations:[]}),cancel(){},isActive:()=>false};
+ }}});
+ assert.equal((await controller.run()).status,'completed');
+});
+
+test('Stop during the final TD pause cancels the pending request immediately',async()=>{
+ let submitted=0;
+ const {controller,store}=setup({PickerDuplicateEngine:{normalizeZip:require('../vendor/duplicate-engine').normalizeZip,createSearchPlan:()=>[{id:'one'}],consolidateCandidates:()=>[{candidate:{slId:'0067788'}}],getTopTdIds:()=>['0067788']},PickerBookmarkLinks:{execute:async()=>{submitted++;return {status:'complete'};}}});
+ const pending=controller.run();await new Promise(resolve=>setTimeout(resolve,10));assert.equal(store.get().activeQuery.type,'links');const start=Date.now();controller.cancel();
+ assert.equal((await pending).status,'cancelled');assert.equal(submitted,0);assert.ok(Date.now()-start<300);
+});

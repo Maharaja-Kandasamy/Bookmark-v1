@@ -180,7 +180,7 @@
   }
 
   function submitAndWait(dialog,search,options={}) {
-    const timeoutMs=options.timeoutMs || 30000,stableMs=options.stableMs || 600;
+    const timeoutMs=options.timeoutMs || 120000,stableMs=options.stableMs || 1500;
     if(options.signal?.aborted)return Promise.resolve({status:'incomplete',rows:[],diagnostic:'Search cancelled'});
     return new Promise(resolve => {
       let finished=false,timer,deadline,pending,observer,before,lastSignature,stableSince=0,sawMutation=false,sawBusy=false,dirty=true;
