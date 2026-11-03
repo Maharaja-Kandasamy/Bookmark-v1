@@ -362,3 +362,17 @@ test('Banner checks include cleaned banner plus city without requiring a ZIP',()
  assert.deepEqual(noZip.map(q=>q.type),['banner-city']);assert.deepEqual(noZip[0].fields,{banner:'quic*stop*',city:'Fort Wayne'});
  assert.equal(engine.createSearchPlan({bannerName:'Quick Stop',zip:'46805'}).some(q=>q.type==='banner-city'),false);
 });
+
+
+test('copied ZIP dash variations normalize before ZIP and search planning',()=>{
+ for(const dash of ['-','\u2010','\u2011','\u2012','\u2013','\u2014','\u2015','\u2212','\uFE58','\uFE63','\uFF0D']){
+  const zip=' 987 '+dash+' 7678 ';
+  assert.equal(engine.normalizePostal(zip),'00987-7678');
+  assert.equal(engine.normalizeZip(zip),'00987');
+  assert.equal(engine.createZip3(zip),'009*');
+  const plan=engine.createSearchPlan({bannerName:'Quick Stop C Store 5',address:'651 E State Blvd',city:'Fort Wayne',state:'IN',zip});
+  plan.filter(q=>q.fields.zip).forEach(q=>assert.equal(q.fields.zip,'009*'));
+  assert.deepEqual(plan.find(q=>q.type==='banner-city').fields,{banner:'quic*stop*',city:'Fort Wayne'});
+  assert.equal(engine.normalizePostal('987'+dash+'78'),'');
+ }
+});

@@ -42,7 +42,7 @@
   const digits = value => String(value || '').replace(/\D/g, '');
 
   function normalizePostal(value) {
-    const text = String(value ?? '').trim().replace(/[��]/g, '-').replace(/\s*-\s*/g, '-');
+    const text = String(value ?? '').trim().replace(/[\u2010-\u2015\u2212\uFE58\uFE63\uFF0D]/g, '-').replace(/\s*-\s*/g, '-');
     if (/^\d{1,5}$/.test(text)) return text.padStart(5, '0');
     const extended = text.match(/^(\d{1,5})-(\d{4})$/);
     if (extended) return `${extended[1].padStart(5, '0')}-${extended[2]}`;
