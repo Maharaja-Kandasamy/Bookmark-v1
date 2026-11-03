@@ -131,6 +131,32 @@
     }).join('*') + (words.length ? '*' : '');
   }
 
+  function storeBannerWildcard(source) {
+    let text=cleanText(source.bannerName)
+      .replace(/<[^>]*>/g,' ')
+      .replace(/^\s*[^a-z0-9]*(?:(?:store|business|banner)\s*name|banner|business|store|name)\s*[:=]\s*/i,'')
+      .replace(/([A-Z]+)([A-Z][a-z])/g,'$1 $2')
+      .replace(/([a-z])([A-Z])/g,'$1 $2')
+      .replace(/(\d)([a-z])/gi,'$1 $2');
+    const tokens=[...text.matchAll(/[a-z0-9]+/gi)];
+    const street=normalizeAddress(source.address).split(' ').filter(Boolean);
+    // Remove an appended address only when it matches this client's address.
+    if(street.length>1 && street.some(word=>/^\d/.test(word))){
+      const normalized=tokens.map(token=>suffixes.get(token[0].toLowerCase()) || token[0].toLowerCase());
+      for(let index=1;index<=tokens.length-street.length;index++){
+        if(!street.every((word,offset)=>word===normalized[index+offset]))continue;
+        const prefix=text.slice(0,tokens[index].index).trim();
+        if(bannerSearchWords(prefix).length || /^\d+$/.test(cleanText(withoutBannerStoreNumber(prefix))))text=prefix;
+        break;
+      }
+    }
+    const wildcard=wildcardWords(text,'banner');
+    if(wildcard)return wildcard;
+    // Keep numeric brands when their only other words are removable descriptors.
+    const numeric=normalizeBanner(text).split(' ').filter(word=>!bannerDescriptors.has(word)).join(' ');
+    return /^\d/.test(text.trim()) && /^\d+$/.test(numeric)?'*'+numeric+'*':'';
+  }
+
   function normalizeSource(raw) {
     const combinedPhone = `${raw.areaCode || ''}${raw.phone || ''}`;
     const phoneDigits = digits(combinedPhone);
@@ -162,15 +188,17 @@
     const source = normalizeSource(raw);
     const bannerWildcard = wildcardWords(source.bannerName, 'banner');
     const addressWildcard = wildcardWords(source.address, 'address');
+    const storeBanner = source.storeNumber ? storeBannerWildcard(source) : '';
     const bannerNeedsWildcard = /[0-9]|[^a-z0-9\s]|\band\b/i.test(source.bannerName);
     const candidates = [
       !bannerNeedsWildcard && bannerWildcard && source.zip3 && { type: 'banner-exact-zip', label: 'Exact banner + ZIP3', fields: { banner: bannerSearchWords(source.bannerName).join(' '), zip: source.zip3 } },
       bannerWildcard && cleanText(source.state) && { type: 'banner-state', label: 'Wildcard banner + state', fields: { banner: bannerWildcard, state: cleanText(source.state) } },
       bannerWildcard && source.zip3 && { type: 'banner-wildcard-zip', label: 'Wildcard banner + ZIP3', fields: { banner: bannerWildcard, zip: source.zip3 } },
       addressWildcard && source.city && { type: 'address-city', label: 'Wildcard address + city', fields: { address: addressWildcard, city: source.city } },
+      addressWildcard && cleanText(source.state) && { type: 'address-state', label: 'Wildcard address + state', fields: { address: addressWildcard, state: cleanText(source.state) } },
       addressWildcard && source.zip3 && { type: 'address-zip', label: 'Wildcard address + ZIP3', fields: { address: addressWildcard, zip: source.zip3 } },
       source.phone7 && { type: 'phone', label: 'Last 7 phone digits', fields: { phone: source.phone7 } },
-      source.storeNumber && bannerWildcard && { type: 'store-banner', label: 'Store number + wildcard banner', fields: { storeNumber: source.storeNumber, banner: bannerWildcard } }
+      source.storeNumber && storeBanner && { type: 'store-banner', label: 'Store number + main banner', fields: { storeNumber: source.storeNumber, banner: storeBanner } }
     ].filter(Boolean);
     const seen = new Set();
     return candidates.filter(query => {
@@ -282,5 +310,5 @@
     return [['SL_ID',candidate?.slId],['SL_STORE_NAME',candidate?.bannerName],['SL_STORE_NUMBER',candidate?.storeNumber],['SL_PA_LINE1',candidate?.address],['SL_PA_CITY_NAME',candidate?.city],['SL_PA_STATE_CODE',candidate?.state],['SL_PA_POSTAL_CODE',candidate?.zip],['PHONE',candidate?.phone]].filter(([,v]) => cleanText(v)).map(([h,v]) => `${h}: ${cleanText(v)}`).join('\n');
   };
 
-  return { cleanText, normalizeWords, normalizeBanner, inferStoreNumber, bannerSearchWords, splitAddress, normalizeAddress, addressWildcard, normalizePostal, normalizeZip, createZip3, wildcardWords, normalizeSource, createSearchPlan, consolidateCandidates, explainCandidate, getTopTdIds, formatTdCopy, formatFullCopy };
+  return { cleanText, normalizeWords, normalizeBanner, inferStoreNumber, bannerSearchWords, splitAddress, normalizeAddress, addressWildcard, normalizePostal, normalizeZip, createZip3, wildcardWords, storeBannerWildcard, normalizeSource, createSearchPlan, consolidateCandidates, explainCandidate, getTopTdIds, formatTdCopy, formatFullCopy };
 });

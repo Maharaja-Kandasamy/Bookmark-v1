@@ -273,3 +273,37 @@ test('state highway names and codes are omitted only for numbered routes',()=>{
  assert.equal(engine.splitAddress('5121 FL Rout 135 STE A').unitKey,'a');
  assert.equal(engine.splitAddress('5121 Main St FL 2').unitKey,'2');
 });
+
+
+test('Address searches combine the same cleaned address with city, state, and ZIP separately',()=>{
+ const plan=engine.createSearchPlan({address:'5121 IN Rout 135 STE A',city:'Austin',state:'TX',zip:'987-7678'});
+ const addressQueries=plan.filter(q=>q.type.startsWith('address-'));
+ assert.deepEqual(addressQueries.map(q=>q.type),['address-city','address-state','address-zip']);
+ assert.deepEqual(addressQueries.map(q=>q.fields),[{address:'512*135*',city:'Austin'},{address:'512*135*',state:'TX'},{address:'512*135*',zip:'009*'}]);
+ const stateOnly=engine.createSearchPlan({address:'RT 135 STE A',state:' IN '});
+ assert.deepEqual(stateOnly.map(q=>q.fields),[{address:'*135*',state:'IN'}]);
+});
+
+
+test('Store search extracts main banner patterns without a brand-name list',()=>{
+ for(const [bannerName,address,expected] of [
+  ['QUICK STOP C STORE 5','','quic*stop*'],
+  ['Store Name: QUICK STOP C STORE #5','','quic*stop*'],
+  ['<b>Banner:</b> Quick Stop LLC #5','','quic*stop*'],
+  ['QuickStopCStore5','','quic*stop*'],
+  ['Business Name: NorthStarFoodsLLC #5','','nort*star*food*'],
+  ['QUICK STOP C STORE 5 651 East State Blvd Fort Wayne IN','651 E State Blvd','quic*stop*'],
+  ['NewRiver Shop #5 12 North Main Road Suite 2','12 N Main Rd Ste 2','new*rive*'],
+  ['7Eleven Store #5','','*eleven*'],
+  ['76 Store #5','','*76*'],
+  ['Shoprite Pumpkins Hotelier','','shop*pump*hote*']
+ ]){
+  const raw={bannerName,address,storeNumber:'5'};
+  assert.equal(engine.storeBannerWildcard(raw),expected,bannerName);
+  assert.equal(engine.createSearchPlan(raw).find(q=>q.type==='store-banner').fields.banner,expected,bannerName);
+  assert.equal(raw.bannerName,bannerName);
+ }
+ assert.equal(engine.storeBannerWildcard({bannerName:'Store LLC #5'}),'');
+ const differentAddress={bannerName:'North Star 651 East State Blvd',address:'99 Oak Road'};
+ assert.match(engine.storeBannerWildcard(differentAddress),/stat/);
+});
