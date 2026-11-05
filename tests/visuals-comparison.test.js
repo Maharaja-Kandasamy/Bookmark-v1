@@ -127,3 +127,9 @@ test('a single small street spelling difference is amber, not an exact match',()
  ['1344 Highway 151','1344 Highway 152','none'],['1344 Mains Oak St','1344 Main Oaks St','none']
  ])assert.equal(compare(a,b,2),want,JSON.stringify([a,b]));
 });
+
+test('banner aliases and case variants compare exactly',()=>{
+ for(const [a,b] of [['AAFES','Army & Air Force Exchange Services'],['BW3','Buffalo Wild Wings'],['AL Post 12','American Legion Post 12'],['7-11','7-Eleven'],['SEVEN ELEVEN','7eleven'],['VFW POST 2','Veterans of Foreign Wars Post 2']])assert.equal(compare(a,b,0),'exact');
+ assert.equal(compare('1344 MAIN STREET','1344 Main St',2),'exact');
+ assert.equal(compare('VFW Post 2','VFW Post 3',0),'none');
+});
