@@ -197,7 +197,7 @@ test('numbered routes remain searchable and keep suite information for ranking',
   assert.equal(plan.find(q=>q.type==='address-zip').fields.address,'*135*');
   assert.equal(engine.normalizeSource({address}).unitKey,'a');
  }
- assert.equal(engine.addressWildcard('5121 RT 135 STE A'),'512*135*');
+ assert.equal(engine.addressWildcard('5121 RT 135 STE A'),'*512*');
  assert.equal(engine.addressWildcard('RT 135A STE B'),'*135a*');
  assert.equal(engine.normalizeAddress('RT 135 STE A'),engine.normalizeAddress('Route 135 Suite A'));
  const ranked=engine.consolidateCandidates({address:'RT 135 STE A'},[
@@ -242,12 +242,12 @@ test('banner plus state has its own query without requiring a ZIP',()=>{
 
 test('US highway designators are omitted while the route number is retained',()=>{
  for(const [address,expected] of [
-  ['5121 US 135','512*135*'],['5121 U.S. 135','512*135*'],
-  ['5121 US Highway 135','512*135*'],['5121 U.S. HWY 135','512*135*'],
-  ['5121 Highway US 135','512*135*'],['5121 Hwy U.S. 135','512*135*'],
-  ['5121 N US-135 STE A','512*135*'],['US 135 STE A','*135*'],
+  ['5121 US 135','*512*'],['5121 U.S. 135','*512*'],
+  ['5121 US Highway 135','*512*'],['5121 U.S. HWY 135','*512*'],
+  ['5121 Highway US 135','*512*'],['5121 Hwy U.S. 135','*512*'],
+  ['5121 N US-135 STE A','*512*'],['US 135 STE A','*135*'],
   ['U.S. 135','*135*'],['US HWY 135','*135*'],['US-135','*135*'],
-  ['12345 US 1','123*1*']
+  ['12345 US 1','*123*']
  ]){
   assert.equal(engine.addressWildcard(address),expected,address);
   const plan=engine.createSearchPlan({address,city:'Austin',zip:'78701'});
@@ -261,14 +261,14 @@ test('US highway designators are omitted while the route number is retained',()=
 test('state highway names and codes are omitted only for numbered routes',()=>{
  const states=[['Alabama','AL'],['Alaska','AK'],['Arizona','AZ'],['Arkansas','AR'],['California','CA'],['Colorado','CO'],['Connecticut','CT'],['Delaware','DE'],['Florida','FL'],['Georgia','GA'],['Hawaii','HI'],['Idaho','ID'],['Illinois','IL'],['Indiana','IN'],['Iowa','IA'],['Kansas','KS'],['Kentucky','KY'],['Louisiana','LA'],['Maine','ME'],['Maryland','MD'],['Massachusetts','MA'],['Michigan','MI'],['Minnesota','MN'],['Mississippi','MS'],['Missouri','MO'],['Montana','MT'],['Nebraska','NE'],['Nevada','NV'],['New Hampshire','NH'],['New Jersey','NJ'],['New Mexico','NM'],['New York','NY'],['North Carolina','NC'],['North Dakota','ND'],['Ohio','OH'],['Oklahoma','OK'],['Oregon','OR'],['Pennsylvania','PA'],['Rhode Island','RI'],['South Carolina','SC'],['South Dakota','SD'],['Tennessee','TN'],['Texas','TX'],['Utah','UT'],['Vermont','VT'],['Virginia','VA'],['Washington','WA'],['West Virginia','WV'],['Wisconsin','WI'],['Wyoming','WY'],['District of Columbia','DC']];
  for(const pair of states)for(const label of pair){
-  assert.equal(engine.addressWildcard('5121 '+label+' Rout 135'),'512*135*',label);
+  assert.equal(engine.addressWildcard('5121 '+label+' Rout 135'),'*512*',label);
   assert.equal(engine.addressWildcard(label+' Highway 135 STE A'),'*135*',label);
  }
- for(const label of ['Rout','Route','RT','RTE','State Rout','State Road','SR','County Road','CR','Interstate','I'])assert.equal(engine.addressWildcard('5121 '+label+' 135'),'512*135*',label);
- for(const address of ['5121 IN-135','5121 I.N. Route 135','5121 New York 135','5121 Highway NY 135','5121 North Carolina Highway 135'])assert.equal(engine.addressWildcard(address),'512*135*',address);
+ for(const label of ['Rout','Route','RT','RTE','State Rout','State Road','SR','County Road','CR','Interstate','I'])assert.equal(engine.addressWildcard('5121 '+label+' 135'),'*512*',label);
+ for(const address of ['5121 IN-135','5121 I.N. Route 135','5121 New York 135','5121 Highway NY 135','5121 North Carolina Highway 135'])assert.equal(engine.addressWildcard(address),'*512*',address);
  for(const [address,expected] of [['123 Washington Street','12*washingt*'],['123 Indiana Ave','12*india*'],['123 New York Avenue','12*n*yo*'],['123 State Street','12*sta*']])assert.equal(engine.addressWildcard(address),expected,address);
  const plan=engine.createSearchPlan({address:'5121 Indiana Rout 135 STE A',city:'Austin',state:'IN',zip:'78701'});
- for(const type of ['address-city','address-zip'])assert.equal(plan.find(q=>q.type===type).fields.address,'512*135*');
+ for(const type of ['address-city','address-zip'])assert.equal(plan.find(q=>q.type===type).fields.address,'*512*');
  assert.equal(engine.splitAddress('5121 Indiana Rout 135 STE A').unitKey,'a');
  assert.equal(engine.splitAddress('5121 FL Rout 135 STE A').unitKey,'a');
  assert.equal(engine.splitAddress('5121 Main St FL 2').unitKey,'2');
@@ -279,7 +279,7 @@ test('Address searches combine the same cleaned address with city, state, and ZI
  const plan=engine.createSearchPlan({address:'5121 IN Rout 135 STE A',city:'Austin',state:'TX',zip:'987-7678'});
  const addressQueries=plan.filter(q=>q.type.startsWith('address-'));
  assert.deepEqual(addressQueries.map(q=>q.type),['address-city','address-state','address-zip']);
- assert.deepEqual(addressQueries.map(q=>q.fields),[{address:'512*135*',city:'Austin'},{address:'512*135*',state:'TX'},{address:'512*135*',zip:'009*'}]);
+ assert.deepEqual(addressQueries.map(q=>q.fields),[{address:'*512*',city:'Austin'},{address:'*512*',state:'TX'},{address:'*512*',zip:'009*'}]);
  const stateOnly=engine.createSearchPlan({address:'RT 135 STE A',state:' IN '});
  assert.deepEqual(stateOnly.map(q=>q.fields),[{address:'*135*',state:'IN'}]);
 });
@@ -344,7 +344,7 @@ test('unusable street addresses search one clear number with leading and trailin
  }
  assert.equal(engine.addressWildcard('005207'),'*005207*');
  assert.equal(engine.addressWildcard('123 Main St #5207'),'12*ma*');
- assert.equal(engine.addressWildcard('5121 US Hwy 135'),'512*135*');
+ assert.equal(engine.addressWildcard('5121 US Hwy 135'),'*512*');
  assert.equal(engine.addressWildcard('Reference 5207 / 9001'),'');
  assert.equal(engine.addressWildcard('Unknown address'),'');
 });
@@ -474,4 +474,30 @@ test('additional 7 Eleven separators and spelled aliases normalize consistently 
   assert.equal(ranked.fieldMatches.bannerName,true,alias);
  }
  for(const unrelated of ['711','7110','17.11','7.110','ABC7_11','Seven11th','7 Elevenish'])assert.notEqual(engine.normalizeBanner(unrelated),engine.normalizeBanner('7 Eleven'),unrelated);
+});
+
+
+test('address searches omit ordinal floors and basement details even when pasted without spaces',()=>{
+ const addresses=['376 S MAIN ST1ST FL374 S MAIN ST BSMT ONLY','376 S MAIN ST 1ST FL','376 S Main St First Floor','376 S Main St 2nd Floor Apt 4','376 S Main St 3RD FL374 S Main St','376 S Main St BSMT ONLY','376 S Main St Basement','376 S Main StAPT12','376 S Main St Apartment 12','376 S Main St Upper Level'];
+ for(const address of addresses){
+  assert.equal(engine.addressWildcard(address),'37*ma*',address);
+  const queries=engine.createSearchPlan({address,city:'Austin',state:'TX',zip:'78701'}).filter(q=>q.fields.address);
+  assert.equal(queries.length,3);queries.forEach(q=>assert.equal(q.fields.address,'37*ma*'));
+ }
+ assert.equal(engine.addressWildcard('123 First Street'),'12*fir*');
+ assert.equal(engine.addressWildcard('123 Basement Road'),'12*baseme*');
+ assert.equal(engine.splitAddress('376 S Main St Apt 12').unitKey,'12');
+});
+
+
+test('address search includes at most one numeric component and prioritizes the door over routes and ordinals',()=>{
+ const cases=[['2233 rte 878 ste 22','*223*'],['233 1st st','*23*'],['2503D 22nd Avenue Apt 100','*2503*'],['123 Main 2nd Street Suite 22','12*ma*'],['2233 US HWY 878 STE 22','*223*'],['RT 878 STE 22','*878*'],['PO Box 12121 Suite 22','*12121*'],['BLDG 5207-5209','*5207*'],['376 S MAIN ST1ST FL374 S MAIN ST BSMT ONLY','37*ma*']];
+ for(const [address,expected] of cases){
+  assert.equal(engine.addressWildcard(address),expected,address);
+  const queries=engine.createSearchPlan({address,city:'Austin',state:'TX',zip:'78701'}).filter(q=>q.fields.address);
+  assert.equal(queries.length,3);
+  for(const query of queries){assert.equal(query.fields.address,expected);assert.ok((query.fields.address.match(/\d+/g)||[]).length<=1,address);}
+ }
+ assert.equal(engine.splitAddress('2233 rte 878 ste 22').unitKey,'22');
+ assert.ok(engine.normalizeAddress('2233 rte 878 ste 22').includes('878'));
 });

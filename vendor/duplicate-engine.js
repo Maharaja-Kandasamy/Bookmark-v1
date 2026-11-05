@@ -112,8 +112,15 @@
   const highwayPrefixPattern = `(?:${highwayStatePattern}|us|state|county|co|north|south|east|west|n|s|e|w)`;
   const numberedRoutePattern = new RegExp(`^(?:(\\d+[a-z]?)\\s+)?(?:${highwayPrefixPattern}\\s+)*(?:rout|route|rt|rte|hwy|highway|road|rd|sr|cr|interstate|i|us|${highwayStatePattern})\\s*(?:(?:us|${highwayStatePattern})\\s+)?(\\d+[a-z]?)\\b`);
 
+  function addressSearchText(value) {
+    const text=cleanText(value)
+      .replace(/\b(street|st|road|rd|avenue|ave|boulevard|blvd|drive|dr|lane|ln)(?=\d+(?:st|nd|rd|th)\s*(?:floor|fl))/gi,'$1 ')
+      .replace(/\b(street|st|road|rd|avenue|ave|boulevard|blvd|drive|dr|lane|ln)(?=(?:apt|apartment|suite|ste|unit)\s*[.#-]*\s*\d)/gi,'$1 ');
+    const detail=/(?:^|\s)(?:(?:\d+(?:st|nd|rd|th)?|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|ground|upper|lower)\s*(?:floor|fl)(?=$|[\s\d.,#-])|(?:basement|bsmt|bsmnt|cellar|ground floor|upper level|lower level)\b)(?!\s+(?:street|st|road|rd|avenue|ave|drive|dr|lane|ln)\b)/i.exec(text);
+    return detail && detail.index>0 ? text.slice(0,detail.index).trim() : text;
+  }
   function addressSearchParts(value) {
-    const base = normalizeWords(splitAddress(value).base).replace(/\bu\s+s\b/g, 'us');
+    const base = normalizeWords(splitAddress(addressSearchText(value)).base).replace(/\bu\s+s\b/g, 'us');
     const numberedRoute = numberedRoutePattern.exec(base);
     if (numberedRoute) return {houseNumber: numberedRoute[1] || '', street: [numberedRoute[2]], numberedRoute: true};
     const words = base.split(' ').filter(Boolean);
@@ -141,7 +148,7 @@
     const box = /^(?:p\s*\.?\s*o\s*\.?\s*box|post\s+office\s+box|pobox)\s*[.:#-]*\s*(\d+)\b/i.exec(cleanText(value));
     if(box)return '*'+box[1]+'*';
     const building=standaloneBuilding(value);
-    if(building)return '*'+building+'*';
+    if(building)return '*'+building.split('-')[0]+'*';
     const {houseNumber,street,numberedRoute} = addressSearchParts(value);
     const placeholders=new Set('unknown unavailable invalid unspecified missing none null na not available provided address tbd'.split(' '));
     const usefulStreet=street.some(word=>/[a-z]/i.test(word) && !placeholders.has(word));
@@ -151,8 +158,9 @@
     }
     const letteredHouse = /^(\d+)[a-z]$/i.exec(houseNumber);
     const house = letteredHouse ? letteredHouse[1] : houseNumber ? houseNumber.slice(0, Math.max(1,houseNumber.length-(houseNumber.length>4?2:1))) : '';
-    if (numberedRoute) return (house ? house + '*' : '*') + street[0] + '*';
-    const words = street.map(word => /^\d+$/.test(word) ? word : word.slice(0,Math.max(1,word.length-2)));
+    if (numberedRoute) return '*'+(house || street[0])+'*';
+    const words = street.filter(word=>!/[0-9]/.test(word)).map(word=>word.slice(0,Math.max(1,word.length-2)));
+    if(house && !words.length)return '*'+house+'*';
     return [house,...words].filter(Boolean).join('*')+'*';
   }
 
