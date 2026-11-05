@@ -434,3 +434,44 @@ test('native Banner plus City runs before ZIP checks so an earlier timeout canno
  assert.equal(plan[0].type,'banner-city');
  assert.deepEqual(plan[0].fields,{banner:'quic*stop*',city:'Fort Wayne'});
 });
+
+
+test('operational banner metadata is removed from native searches without erasing identity or street names',()=>{
+ for(const suffix of ['Fintech','Fountain-Fintech','Draft','Draught','On Premise','On Premises','Off Premise','Off Premises','EFT','POS Terminal','Payment Processing','Merchant Services']){
+  const bannerName='Applebees-'+suffix;
+  assert.equal(engine.wildcardWords(bannerName,'banner'),'applebees*',suffix);
+  const plan=engine.createSearchPlan({bannerName,storeNumber:'12',city:'Austin',state:'TX',zip:'78701'});
+  plan.filter(q=>q.fields.banner).forEach(q=>assert.equal(q.fields.banner,'applebees*'));
+ }
+ assert.equal(engine.wildcardWords('Applebees Fintech','banner'),'applebees*');
+ assert.equal(engine.wildcardWords('Fountain Cafe','banner'),'foun*cafe*');
+ assert.equal(engine.wildcardWords('Draft House','banner'),'draf*hous*');
+ assert.equal(engine.addressWildcard('2503 Fountain Road'),'250*founta*');
+ assert.equal(engine.addressWildcard('2503 Fintech Road'),'250*finte*');
+ assert.notEqual(engine.normalizeBanner('Applebees-Fintech'),engine.normalizeBanner('Applebees'));
+});
+
+test('attached house letters keep every door digit for search and retain full identity for comparison',()=>{
+ for(const address of ['2503D FOREST HILLS RD','2503d Forest Hills Road','2503D Forest Hills Rd Suite 100']){
+  assert.equal(engine.addressWildcard(address),'2503*fore*hil*');
+  engine.createSearchPlan({address,city:'Austin',state:'TX',zip:'78701'}).filter(q=>q.fields.address).forEach(q=>assert.equal(q.fields.address,'2503*fore*hil*'));
+ }
+ assert.equal(engine.addressWildcard('00123B Main St'),'00123*ma*');
+ assert.equal(engine.addressWildcard('2503 Forest Hills Rd'),'250*fore*hil*');
+ assert.equal(engine.addressWildcard('RT 135A STE B'),'*135a*');
+ assert.notEqual(engine.normalizeAddress('2503D Forest Hills Rd'),engine.normalizeAddress('2503C Forest Hills Rd'));
+});
+
+
+test('additional 7 Eleven separators and spelled aliases normalize consistently inside messy banners',()=>{
+ const aliases=['7.11','7_11','7 / 11','7--11','7—Eleven','7_ELEVEN','7.Eleven','7/Eleven','SevenEleven','Seven11','Seven-11','Seven_11','SEVEN.ELEVEN','7 & 11','7 + Eleven'];
+ for(const alias of aliases){
+  assert.equal(engine.normalizeBanner(alias),engine.normalizeBanner('7 Eleven'),alias);
+  assert.equal(engine.wildcardWords(alias,'banner'),'*eleven*',alias);
+  const plan=engine.createSearchPlan({bannerName:alias+'-Fintech #00125',city:'Austin',state:'TX',zip:'78701'});
+  plan.filter(q=>q.fields.banner).forEach(q=>assert.equal(q.fields.banner,'*eleven*',alias));
+  const [ranked]=engine.consolidateCandidates({bannerName:alias+' #00125'},[{candidate:{slId:'900',bannerName:'7 Eleven',storeNumber:'00125'}}]);
+  assert.equal(ranked.fieldMatches.bannerName,true,alias);
+ }
+ for(const unrelated of ['711','7110','17.11','7.110','ABC7_11','Seven11th','7 Elevenish'])assert.notEqual(engine.normalizeBanner(unrelated),engine.normalizeBanner('7 Eleven'),unrelated);
+});

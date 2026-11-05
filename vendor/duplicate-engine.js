@@ -35,7 +35,9 @@
   }
   const withoutBannerStoreNumber = value => cleanText(value).replace(/#\s*\d+(?![\da-z-])/gi, ' ');
   // Explicit brand aliases: never rewrite bare 711 or numbers inside other tokens.
-  const canonicalBanner = value => cleanText(value).replace(/\b(?:7[\s\u2010-\u2015\u2212\uFE58\uFE63\uFF0D\/-]+11|7[\s-]*eleven|seven[\s-]*eleven)\b/gi, '7 eleven');
+  const brandSeparator = '[\\s._/\\\\&+\\u2010-\\u2015\\u2212\\uFE58\\uFE63\\uFF0D-]';
+  const sevenElevenPattern = new RegExp('(^|[^a-z0-9])(?:7'+brandSeparator+'+11|7'+brandSeparator+'*eleven|seven'+brandSeparator+'*(?:eleven|11))(?=$|[^a-z0-9])','gi');
+  const canonicalBanner = value => cleanText(value).replace(sevenElevenPattern, '$1'+'7 eleven');
   const normalizeBanner = value => normalizeWords(canonicalBanner(withoutBannerStoreNumber(value)).replace(/([a-z0-9])['\u2019]s\b/gi, '$1s'))
     .replace(/\b(?:l\s+l\s+c|l\s+t\s+d|i\s+n\s+c)\b/g, ' ')
     .replace(/\b([a-z0-9]+)\s+s\b/g, '$1s')
@@ -147,7 +149,8 @@
       const number=fallbackAddressNumber(value);
       return number?'*'+number+'*':'';
     }
-    const house = houseNumber ? houseNumber.slice(0, Math.max(1,houseNumber.length-(houseNumber.length>4?2:1))) : '';
+    const letteredHouse = /^(\d+)[a-z]$/i.exec(houseNumber);
+    const house = letteredHouse ? letteredHouse[1] : houseNumber ? houseNumber.slice(0, Math.max(1,houseNumber.length-(houseNumber.length>4?2:1))) : '';
     if (numberedRoute) return (house ? house + '*' : '*') + street[0] + '*';
     const words = street.map(word => /^\d+$/.test(word) ? word : word.slice(0,Math.max(1,word.length-2)));
     return [house,...words].filter(Boolean).join('*')+'*';
@@ -155,8 +158,19 @@
 
   const bannerDescriptors = new Set('store stores cstore cstores convenience pump pumps hotel hotels motel motels dispensary dispensaries shop shops'.split(' '));
 
+  // Remove operational suffix chunks only at explicit separators; keep named businesses intact.
+  const bannerMetadataSuffixes = new Set(['fintech','fountain','draft','draught','on premise','on premises','off premise','off premises','eft','pos terminal','payment processing','merchant services']);
+  function bannerSearchText(value) {
+    const text=canonicalBanner(withoutBannerStoreNumber(value)).replace(/<[^>]*>/g,' ')
+      .replace(/&(?:[a-z]+|#\d+|#x[a-f0-9]+);/gi,' ')
+      .replace(/\b(?:https?:\/\/|www\.)\S+/gi,' ')
+      .replace(/\b[^\s@]+@[^\s@]+\.[^\s@]+\b/g,' ');
+    const chunks=text.split(/\s*[-\u2010-\u2015|;]\s*/);
+    while(chunks.length>1 && bannerMetadataSuffixes.has(normalizeWords(chunks[chunks.length-1])))chunks.pop();
+    return chunks.join(' ').replace(/\bfintech\b/gi,' ');
+  }
   function bannerSearchWords(value) {
-    const text = canonicalBanner(withoutBannerStoreNumber(value)).replace(/<[^>]*>/g, ' ')
+    const text = bannerSearchText(value).replace(/<[^>]*>/g, ' ')
       .replace(/&(?:[a-z]+|#\d+|#x[a-f0-9]+);/gi, ' ')
       .replace(/\b(?:https?:\/\/|www\.)\S+/gi, ' ')
       .replace(/\b[^\s@]+@[^\s@]+\.[^\s@]+\b/g, ' ')
