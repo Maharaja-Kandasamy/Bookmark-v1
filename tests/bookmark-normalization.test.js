@@ -376,3 +376,61 @@ test('copied ZIP dash variations normalize before ZIP and search planning',()=>{
   assert.equal(engine.normalizePostal('987'+dash+'78'),'');
  }
 });
+
+
+test('abbreviation evidence matches complete phrases inside names without declaring direct duplicates',()=>{
+ for(const [short,long] of [['BW3','Buffalo Wild Wings'],['VFW','Veterans of Foreign Wars'],['AAFES','Army & Air Force Exchange Services'],['AL','American Legion'],['KOC','Knights of Columbus']]){
+  const [result]=engine.consolidateCandidates({bannerName:short+' Post 125'},[{candidate:{slId:'10',bannerName:long+' Post 125'}}]);
+  assert.equal(result.fieldMatches.bannerAbbreviation,true,short);
+  assert.equal(result.directMatch,false,short);
+ }
+ const [different]=engine.consolidateCandidates({bannerName:'AL Market'},[{candidate:{slId:'11',bannerName:'American Legion Post 125'}}]);
+ assert.equal(different?.fieldMatches.bannerAbbreviation,undefined);
+ assert.equal(engine.wildcardWords('BW3 #125','banner'),'bw3*');
+});
+
+test('single letter search tokens become wildcard boundaries while numeric identities remain usable',()=>{
+ assert.equal(engine.wildcardWords('Circle K','banner'),'circle*');
+ assert.equal(engine.wildcardWords('Alpha X Market','banner'),'alph*mark*');
+ assert.equal(engine.addressWildcard('123 X Main Street'),'12*ma*');
+ assert.equal(engine.addressWildcard('123 Main X Street'),'12*ma*');
+ assert.equal(engine.addressWildcard('BLDG 5207'),'*5207*');
+ assert.equal(engine.wildcardWords('76','banner'),'*76*');
+});
+
+
+test('7-11 brand aliases share case-insensitive search and ranking identity',()=>{
+ const aliases=['7-11','7–11','7/11','7 Eleven','7 ELEVEN','7Eleven','Seven Eleven','SEVEN-ELEVEN'];
+ for(const bannerName of aliases){
+  assert.equal(engine.normalizeBanner(bannerName),engine.normalizeBanner('7 eleven'),bannerName);
+  assert.equal(engine.wildcardWords(bannerName,'banner'),'*eleven*',bannerName);
+  const plan=engine.createSearchPlan({bannerName:bannerName+' #00125',city:'Austin',state:'TX',zip:'78701'});
+  assert.ok(plan.some(q=>q.type==='banner-city'));
+  for(const query of plan.filter(q=>q.fields.banner)) assert.equal(query.fields.banner,'*eleven*');
+  const [ranked]=engine.consolidateCandidates({bannerName:bannerName+' #00125',city:'AUSTIN'},[{candidate:{slId:'77',bannerName:'7 eleven',storeNumber:'00125',city:'austin'}}]);
+  assert.equal(ranked.fieldMatches.bannerName,true);
+  assert.equal(ranked.fieldMatches.city,true);
+  assert.equal(ranked.directMatch,true);
+ }
+ for(const unrelated of ['711','17-11','7-110','ABC7-11','Store 711'])assert.notEqual(engine.normalizeBanner(unrelated),engine.normalizeBanner('7 Eleven'));
+ const [ranked]=engine.consolidateCandidates({bannerName:'7-11'},[{candidate:{slId:'78',bannerName:'7 ELEVEN'}}]);
+ assert.equal(ranked.fieldMatches.bannerName,true);assert.equal(ranked.directMatch,false);
+ assert.equal(engine.normalizeSource({address:'123 MAIN ST',city:'Austin',state:'TX'}).addressKey,engine.normalizeSource({address:'123 main st',city:'austin',state:'tx'}).addressKey);
+});
+
+
+test('PO Box searches use only the complete box number with wildcard boundaries',()=>{
+ for(const address of ['PO Box 12121','P.O. BOX #12121','P O Box 12121','Post Office Box 12121','POBOX 12121','PO Box 00121 Austin TX 78701']){
+  const expected=address.includes('00121')?'*00121*':'*12121*';
+  assert.equal(engine.addressWildcard(address),expected,address);
+  const searches=engine.createSearchPlan({address,city:'Austin',state:'TX',zip:'78701'}).filter(q=>q.fields.address);
+  assert.equal(searches.length,3);searches.forEach(q=>assert.equal(q.fields.address,expected));
+ }
+ assert.equal(engine.addressWildcard('123 Box Street'),'12*b*');
+});
+
+test('native Banner plus City runs before ZIP checks so an earlier timeout cannot skip it',()=>{
+ const plan=engine.createSearchPlan({bannerName:'Quick Stop',city:'Fort Wayne',zip:'46805'});
+ assert.equal(plan[0].type,'banner-city');
+ assert.deepEqual(plan[0].fields,{banner:'quic*stop*',city:'Fort Wayne'});
+});

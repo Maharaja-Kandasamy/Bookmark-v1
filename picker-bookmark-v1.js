@@ -35,10 +35,42 @@
     return numbers.length === 1 ? numbers[0] : '';
   }
   const withoutBannerStoreNumber = value => cleanText(value).replace(/#\s*\d+(?![\da-z-])/gi, ' ');
-  const normalizeBanner = value => normalizeWords(withoutBannerStoreNumber(value).replace(/([a-z0-9])['\u2019]s\b/gi, '$1s'))
+  // Explicit brand aliases: never rewrite bare 711 or numbers inside other tokens.
+  const canonicalBanner = value => cleanText(value).replace(/\b(?:7[\s\u2010-\u2015\u2212\uFE58\uFE63\uFF0D\/-]+11|7[\s-]*eleven|seven[\s-]*eleven)\b/gi, '7 eleven');
+  const normalizeBanner = value => normalizeWords(canonicalBanner(withoutBannerStoreNumber(value)).replace(/([a-z0-9])['\u2019]s\b/gi, '$1s'))
     .replace(/\b(?:l\s+l\s+c|l\s+t\s+d|i\s+n\s+c)\b/g, ' ')
     .replace(/\b([a-z0-9]+)\s+s\b/g, '$1s')
     .split(' ').filter(word => word && !['limited','ltd','inc','incorporated','llc','llp','plc','corp','corporation','co','company'].includes(word)).join(' ');
+
+  // User-supplied vocabulary is comparison evidence, never an automatic identity.
+  const bannerAbbreviations = [
+    ['aafes','army air force exchange services'],['bdi','bulk data importer'],['billetins','military lodging'],
+    ['bpoe','benevolent protective order of elks'],['bw3','buffalo wild wings'],['byob','bring your own booze','bring your own bottle'],
+    ['cid','client information delivery'],['deca','defense commissary agency'],['dpv','delivery point validation'],
+    ['dso','date of store opening'],['dsw','data specialist workbench'],['fmi','food marketing institute'],
+    ['foe','fraternal order of eagles'],['fop','fraternal order of police'],['fte','full time employee'],
+    ['hbc','health and beauty care'],['hq','headquarters'],['iga','independent grocers alliance'],
+    ['ipc','information processing center'],['irt','immediate reports to'],['koa','kampgrounds of america'],
+    ['koc','knights of columbus'],['mfr','mark for review'],['msw','matching specialist workbench'],
+    ['nacds','national association of chain and drug stores'],['nacs','national association of convenience stores'],
+    ['nexcom','navy exchange service command'],['nga','national grocery association'],['ogrds','one global reference data system'],
+    ['otc','over the counter'],['otm','one to many'],['ouf','outlet updated frequency'],['phm','potential historical match'],
+    ['plu','price look ups'],['pos','point of sale'],['px','army exchange'],['qc','quality check','quality control'],
+    ['rv','recreational vehicle'],['rx','prescription'],['sla','service level agreement'],
+    ['sop','standard operating procedure','standard operating proceedure'],['sow','statement of work'],
+    ['tdo','trade dimensions operation'],['usps','united states postal services','united states postal service'],
+    ['vfw','veterans of foreign wars'],['vss','verified store status source'],['al','american legion']
+  ];
+  function abbreviationBannerKey(value) {
+    let text=' '+normalizeBanner(value).replace(/\band\b/g,' ').replace(/\s+/g,' ')+' ';
+    for(const [short,...phrases] of bannerAbbreviations){
+      for(const phrase of phrases){
+        const normalized=normalizeBanner(phrase).replace(/\band\b/g,' ').replace(/\s+/g,' ').trim();
+        text=text.split(' '+normalized+' ').join(' '+short+' ');
+      }
+    }
+    return text.trim().replace(/\s+/g,' ');
+  }
   const digits = value => String(value || '').replace(/\D/g, '');
 
   function normalizePostal(value) {
@@ -90,7 +122,7 @@
     const roadTypes = new Set('street st road rd avenue ave av boulevard blvd drive dr lane ln highway hwy route rte court ct circle cir place pl terrace ter parkway pkwy way trail trl square sq expressway expy junction jct'.split(' '));
     for (const word of words.slice(houseIndex >= 0 ? houseIndex + 1 : 0)) {
       if (roadTypes.has(word) && street.length) break;
-      if (addressNoise.has(word) || ['county','co'].includes(word)) continue;
+      if (addressNoise.has(word) || ['county','co'].includes(word) || /^[a-z]$/.test(word)) continue;
       if (/^\d/.test(word) && street.length) break;
       street.push(word);
     }
@@ -105,6 +137,8 @@
     return numbers.length===1?numbers[0]:'';
   }
   function addressWildcard(value) {
+    const box = /^(?:p\s*\.?\s*o\s*\.?\s*box|post\s+office\s+box|pobox)\s*[.:#-]*\s*(\d+)\b/i.exec(cleanText(value));
+    if(box)return '*'+box[1]+'*';
     const building=standaloneBuilding(value);
     if(building)return '*'+building+'*';
     const {houseNumber,street,numberedRoute} = addressSearchParts(value);
@@ -123,11 +157,11 @@
   const bannerDescriptors = new Set('store stores cstore cstores convenience pump pumps hotel hotels motel motels dispensary dispensaries shop shops'.split(' '));
 
   function bannerSearchWords(value) {
-    const text = withoutBannerStoreNumber(value).replace(/<[^>]*>/g, ' ')
+    const text = canonicalBanner(withoutBannerStoreNumber(value)).replace(/<[^>]*>/g, ' ')
       .replace(/&(?:[a-z]+|#\d+|#x[a-f0-9]+);/gi, ' ')
       .replace(/\b(?:https?:\/\/|www\.)\S+/gi, ' ')
       .replace(/\b[^\s@]+@[^\s@]+\.[^\s@]+\b/g, ' ')
-      .replace(/\d+/g, ' ')
+      .replace(/\bBW3\b/gi, ' bwthreeplaceholder ').replace(/\d+/g, ' ').replace(/bwthreeplaceholder/g, 'bw3')
       .replace(/&/g, ' ');
     const words = normalizeWords(text).split(' ').filter(word => word.length > 1 && !/^\d{7,}$/.test(word) && !['undefined','null','nan','and'].includes(word));
     return normalizeBanner(words.join(' ')).split(' ').filter(word => word.length > 1 && !bannerDescriptors.has(word));
@@ -140,8 +174,9 @@
       if (/^\d+$/.test(numericBrand)) return `*${numericBrand}*`;
       const words = bannerSearchWords(value);
       if (!words.length) return '';
-      const firstIndex = cleanText(value).toLowerCase().indexOf(words[0]);
-      const leading = firstIndex > 0 && cleanText(value).slice(0,firstIndex).trim() ? '*' : '';
+      const searchText = canonicalBanner(value).toLowerCase();
+      const firstIndex = searchText.indexOf(words[0]);
+      const leading = firstIndex > 0 && searchText.slice(0,firstIndex).trim() ? '*' : '';
       return leading + words.map(word => words.length === 1 ? word : word.slice(0,4)).join('*') + '*';
     }
     let words = (kind === 'address' ? normalizeAddress(value) : kind === 'banner' ? normalizeBanner(value) : normalizeWords(value)).split(' ').filter(Boolean);
@@ -190,6 +225,7 @@
       slId: cleanText(raw.slId),
       bannerName: cleanText(raw.bannerName),
       bannerKey: normalizeBanner(raw.bannerName),
+      abbreviationBannerKey: abbreviationBannerKey(raw.bannerName),
       address: cleanText(raw.address),
       addressKey: normalizeAddress(raw.address),
       unitKey: splitAddress(raw.address).unitKey,
@@ -213,8 +249,8 @@
     const storeBanner = source.storeNumber ? storeBannerWildcard(source) : '';
     const bannerNeedsWildcard = /[0-9]|[^a-z0-9\s]|\band\b/i.test(source.bannerName);
     const candidates = [
-      !bannerNeedsWildcard && bannerWildcard && source.zip3 && { type: 'banner-exact-zip', label: 'Exact banner + ZIP3', fields: { banner: bannerSearchWords(source.bannerName).join(' '), zip: source.zip3 } },
       bannerWildcard && source.city && { type: 'banner-city', label: 'Wildcard banner + city', fields: { banner: bannerWildcard, city: source.city } },
+      !bannerNeedsWildcard && bannerWildcard && source.zip3 && { type: 'banner-exact-zip', label: 'Exact banner + ZIP3', fields: { banner: bannerSearchWords(source.bannerName).join(' '), zip: source.zip3 } },
       bannerWildcard && cleanText(source.state) && { type: 'banner-state', label: 'Wildcard banner + state', fields: { banner: bannerWildcard, state: cleanText(source.state) } },
       bannerWildcard && source.zip3 && { type: 'banner-wildcard-zip', label: 'Wildcard banner + ZIP3', fields: { banner: bannerWildcard, zip: source.zip3 } },
       addressWildcard && source.city && { type: 'address-city', label: 'Wildcard address + city', fields: { address: addressWildcard, city: source.city } },
@@ -240,8 +276,10 @@
     const fieldMatches = {};
     let score = 0;
     const sameBanner = !!(source.bannerKey && source.bannerKey === other.bannerKey);
+    const abbreviationMatch = !sameBanner && !!(source.abbreviationBannerKey && source.abbreviationBannerKey === other.abbreviationBannerKey);
     const sameStore = !!(source.storeKey && source.storeKey === other.storeKey);
     if (sameBanner) { rules.push('Same standardized banner name'); fieldMatches.bannerName=true; score+=15; }
+    if (abbreviationMatch) { rules.push('Equivalent banner abbreviation (review required)'); fieldMatches.bannerAbbreviation=true; score+=10; }
     if (sameStore) { rules.push('Same store number'); fieldMatches.storeNumber=true; score+=20; }
     const sameAddress = includesAddress(source.addressKey, other.addressKey);
     if (sameAddress) { const exactAddress=source.addressKey===other.addressKey; rules.push(exactAddress?'Same standardized address':'Same or partial standardized address'); fieldMatches.address=true; score+=exactAddress?25:15; }
