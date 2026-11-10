@@ -123,7 +123,7 @@
       $('.google-banner-city').disabled = !source.bannerName || !source.city;
       $('.notice').textContent=state.diagnostic || (state.status === 'ready' ? 'Ready.' : state.status === 'completed' ? 'Checks complete.' : state.status === 'paused' ? 'Paused. The current search may finish; Continue resumes the remaining checks.' : 'Checking current record.');
 
-      const queryGroups = {banner:['banner-exact-zip','banner-city','banner-wildcard-zip'],bannerState:['banner-state'],address:['address-city','address-state','address-zip','address-door','address-ordinal'],phone:['phone'],store:['store-banner']};
+      const queryGroups = {banner:['banner-exact-zip','banner-city','banner-wildcard-zip'],bannerState:['banner-state'],address:['address-city','address-state','address-zip','address-door'],phone:['phone'],store:['store-banner']};
       shadow.querySelectorAll('[data-search]').forEach(button => { const group=button.dataset.search; button.disabled=busy || !availablePlan.some(query => group==='all' || queryGroups[group]?.includes(query.type)); if(group==='store'){const query=availablePlan.find(query=>query.type==='store-banner');button.title=query?'Store #'+query.fields.storeNumber+' + '+query.fields.banner:'Store search requires a store number and a usable banner';} });
       const manualRequired = !state.source && !!state.diagnostic;
       $('.notice').dataset.tone = manualRequired ? 'warning' : 'info';

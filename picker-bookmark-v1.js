@@ -153,11 +153,16 @@
     const numbers=[...new Set((base.match(/\d+/g) || text.match(/\d+/g) || []))];
     return numbers.length===1?numbers[0]:'';
   }
+  const streetOrdinalWords = new Set('first second third fourth fifth sixth seventh eighth ninth tenth eleventh twelfth thirteenth fourteenth fifteenth sixteenth seventeenth eighteenth nineteenth twentieth thirtieth fortieth fiftieth sixtieth seventieth eightieth ninetieth hundredth thousandth'.split(' '));
+  function searchableStreetWords(street) {
+    const tens=new Set('twenty thirty forty fifty sixty seventy eighty ninety'.split(' '));
+    return street.filter((word,index)=>!/[0-9]/.test(word) && !streetOrdinalWords.has(word) && !(tens.has(word) && streetOrdinalWords.has(street[index+1])));
+  }
   function addressWildcard(value) {
     const composite=hyphenatedDoor(value);
     if(composite){
       const {street}=addressSearchParts('1 '+composite.street);
-      const words=street.filter(word=>!/[0-9]/.test(word)).map(word=>word.slice(0,Math.max(1,word.length-2)));
+      const words=searchableStreetWords(street).map(word=>word.slice(0,Math.max(1,word.length-2)));
       const door=composite.door.replace(/[^a-z0-9]+/gi,'*');
       return words.length?door+'*'+words.join('*')+'*':'*'+door+'*';
     }
@@ -166,16 +171,17 @@
     const building=standaloneBuilding(value);
     if(building)return '*'+building.split('-')[0]+'*';
     const {houseNumber,street,numberedRoute} = addressSearchParts(value);
+    const letteredHouse = /^(\d+)[a-z]$/i.exec(houseNumber);
+    const house = letteredHouse ? letteredHouse[1] : houseNumber ? houseNumber.slice(0, Math.max(1,houseNumber.length-(houseNumber.length>4?2:1))) : '';
     const placeholders=new Set('unknown unavailable invalid unspecified missing none null na not available provided address tbd'.split(' '));
     const usefulStreet=street.some(word=>/[a-z]/i.test(word) && !placeholders.has(word));
+    if(!numberedRoute && /^\d/.test(cleanText(value)) && house && street.some(word=>/\d/.test(word)) && !usefulStreet)return '*'+house+'*';
     if(!numberedRoute && (!usefulStreet || (!houseNumber && /\d/.test(cleanText(value))))){
       const number=fallbackAddressNumber(value);
       return number?'*'+number+'*':'';
     }
-    const letteredHouse = /^(\d+)[a-z]$/i.exec(houseNumber);
-    const house = letteredHouse ? letteredHouse[1] : houseNumber ? houseNumber.slice(0, Math.max(1,houseNumber.length-(houseNumber.length>4?2:1))) : '';
     if (numberedRoute) return '*'+(house || street[0])+'*';
-    const words = street.filter(word=>!/[0-9]/.test(word)).map(word=>word.slice(0,Math.max(1,word.length-2)));
+    const words = searchableStreetWords(street).map(word=>word.slice(0,Math.max(1,word.length-2)));
     if(house && !words.length)return '*'+house+'*';
     return [house,...words].filter(Boolean).join('*')+'*';
   }
@@ -185,11 +191,11 @@
   // Remove operational suffix chunks only at explicit separators; keep named businesses intact.
   const bannerMetadataSuffixes = new Set(['fintech','fountain','draft','draught','on premise','on premises','off premise','off premises','eft','pos terminal','payment processing','merchant services']);
   function bannerSearchText(value) {
-    const text=canonicalBanner(withoutBannerStoreNumber(value)).replace(/<[^>]*>/g,' ')
+    const text=canonicalBanner(withoutBannerStoreNumber(value)).replace(/\b(?:store\s+)?status\s*[:=]\s*(?:open|op|closed|close|active|inactive|unverified|duplicate)\b/gi,' ').replace(/<[^>]*>/g,' ')
       .replace(/&(?:[a-z]+|#\d+|#x[a-f0-9]+);/gi,' ')
       .replace(/\b(?:https?:\/\/|www\.)\S+/gi,' ')
       .replace(/\b[^\s@]+@[^\s@]+\.[^\s@]+\b/g,' ');
-    const chunks=text.split(/\s*[-\u2010-\u2015|;]\s*/);
+    const chunks=text.replace(/\S*\d\S*/g,word=>/^\W*bw3\W*$/i.test(word)?word:' ').split(/\s*[-\u2010-\u2015|;]\s*/);
     while(chunks.length>1 && bannerMetadataSuffixes.has(normalizeWords(chunks[chunks.length-1])))chunks.pop();
     return chunks.join(' ').replace(/\bfintech\b/gi,' ');
   }
@@ -198,9 +204,10 @@
       .replace(/&(?:[a-z]+|#\d+|#x[a-f0-9]+);/gi, ' ')
       .replace(/\b(?:https?:\/\/|www\.)\S+/gi, ' ')
       .replace(/\b[^\s@]+@[^\s@]+\.[^\s@]+\b/g, ' ')
-      .replace(/\bBW3\b/gi, ' bwthreeplaceholder ').replace(/\d+/g, ' ').replace(/bwthreeplaceholder/g, 'bw3')
+      .replace(/\bBW3\b/gi, ' bwthreeplaceholder ').replace(/\S*\d\S*/g, ' ').replace(/bwthreeplaceholder/g, 'bw3')
       .replace(/&/g, ' ');
-    const words = normalizeWords(text).split(' ').filter(word => word.length > 1 && !/^\d{7,}$/.test(word) && !['undefined','null','nan','and','close','closed'].includes(word));
+    const searchable = normalizeWords(text).replace(/\b(?:(?:temporarily|temp|permanently|perm)\s+(?:close|closed)|(?:re\s+)?opening\s+soon|closing\s+soon|(?:now|currently)\s+(?:open|closed)|out\s+of\s+business|no\s+longer\s+operating)\b/g,' ');
+    const words = searchable.split(' ').filter(word => word.length > 1 && !/^\d{7,}$/.test(word) && !['undefined','null','nan','and','close','closed','open','op','reopened'].includes(word));
     return normalizeBanner(words.join(' ')).split(' ').filter(word => word.length > 1 && !bannerDescriptors.has(word));
   }
 
@@ -231,7 +238,7 @@
       .replace(/^\s*[^a-z0-9]*(?:(?:store|business|banner)\s*name|banner|business|store|name)\s*[:=]\s*/i,'')
       .replace(/([A-Z]+)([A-Z][a-z])/g,'$1 $2')
       .replace(/([a-z])([A-Z])/g,'$1 $2')
-      .replace(/(\d)([a-z])/gi,'$1 $2');
+      ;
     const tokens=[...text.matchAll(/[a-z0-9]+/gi)];
     const street=normalizeAddress(source.address).split(' ').filter(Boolean);
     // Remove an appended address only when it matches this client's address.
@@ -279,29 +286,12 @@
     };
   }
 
-  function ordinalStreetSearch(value) {
-    const units=['first','second','third','fourth','fifth','sixth','seventh','eighth','ninth'];
-    const small=[...units,'tenth','eleventh','twelfth','thirteenth','fourteenth','fifteenth','sixteenth','seventeenth','eighteenth','nineteenth'];
-    const tens=['twenty','thirty','forty','fifty','sixty','seventy','eighty','ninety'];
-    const exactTens=['twentieth','thirtieth','fortieth','fiftieth','sixtieth','seventieth','eightieth','ninetieth'];
-    const names=[...tens.map(t=>t+' (?:'+units.join('|')+')'),...small,...exactTens].join('|');
-    const match=new RegExp('\\b('+names+'|\\d{1,4}(?:st|nd|rd|th))\\s+(?:street|st|avenue|ave|road|rd|drive|dr|lane|ln|boulevard|blvd|highway|hwy|court|ct|place|pl|way|terrace|ter)\\b','i').exec(normalizeWords(splitAddress(value).base));
-    if(!match)return '';
-    const token=match[1].toLowerCase();let number;
-    if(/^\d/.test(token))number=parseInt(token,10);
-    else if(small.includes(token))number=small.indexOf(token)+1;
-    else if(exactTens.includes(token))number=(exactTens.indexOf(token)+2)*10;
-    else {const parts=token.split(' ');number=(tens.indexOf(parts[0])+2)*10+units.indexOf(parts[1])+1;}
-    const suffix=number%100>=11 && number%100<=13?'th':({1:'st',2:'nd',3:'rd'}[number%10] || 'th');
-    return '*'+number+suffix+'*';
-  }
   const wrapBannerSearch = value => value?'*'+value.replace(/^\*+|\*+$/g,'')+'*':'';
   function createSearchPlan(raw) {
     const source = normalizeSource(raw);
     const bannerWildcard = wrapBannerSearch(wildcardWords(source.bannerName, 'banner'));
     const addressWildcard = wildcardWords(source.address, 'address');
     const storeBanner = source.storeNumber ? wrapBannerSearch(storeBannerWildcard(source)) : '';
-    const ordinalStreet = ordinalStreetSearch(source.address);
     const compositeDoor = hyphenatedDoor(source.address);
     const bannerNeedsWildcard = /[0-9]|[^a-z0-9\s]|\band\b/i.test(source.bannerName);
     const candidates = [
@@ -313,7 +303,6 @@
       addressWildcard && cleanText(source.state) && { type: 'address-state', label: 'Wildcard address + state', fields: { address: addressWildcard, state: cleanText(source.state) } },
       addressWildcard && source.zip3 && { type: 'address-zip', label: 'Wildcard address + ZIP3', fields: { address: addressWildcard, zip: source.zip3 } },
       compositeDoor && {type:'address-door',label:'Full hyphenated door number',fields:{address:'*'+compositeDoor.door.replace(/[^a-z0-9]+/gi,'*')+'*',...(source.city?{city:source.city}:cleanText(source.state)?{state:cleanText(source.state)}:source.zip3?{zip:source.zip3}:{})}},
-      ordinalStreet && {type:'address-ordinal',label:'Numbered street spelling',fields:{address:ordinalStreet,...(source.city?{city:source.city}:source.zip3?{zip:source.zip3}:cleanText(source.state)?{state:cleanText(source.state)}:{})}},
       source.phone7 && { type: 'phone', label: 'Last 7 phone digits', fields: { phone: source.phone7 } },
       source.storeNumber && storeBanner && { type: 'store-banner', label: 'Store number + main banner', fields: { storeNumber: source.storeNumber, banner: storeBanner } }
     ].filter(Boolean);
@@ -1318,7 +1307,7 @@
       const current = store.get();
       if (!current?.source) return { status: 'error', observations: [], diagnostic: current?.diagnostic || 'Source table not found' };
       store.set({searchGroup:group});
-      const groups = { banner: ['banner-exact-zip','banner-city','banner-wildcard-zip'], bannerState: ['banner-state'], address: ['address-city','address-state','address-zip','address-door','address-ordinal'], phone: ['phone'], store: ['store-banner'] };
+      const groups = { banner: ['banner-exact-zip','banner-city','banner-wildcard-zip'], bannerState: ['banner-state'], address: ['address-city','address-state','address-zip','address-door'], phone: ['phone'], store: ['store-banner'] };
       const plan = Engine.createSearchPlan(current.source).filter(query => group === 'all' || groups[group]?.includes(query.type));
       if (!plan.length) {
         const result = { status: 'incomplete', observations: [], progress: 0, total: 0, diagnostic: 'Not enough source data to create searches' };
@@ -1565,7 +1554,7 @@
       $('.google-banner-city').disabled = !source.bannerName || !source.city;
       $('.notice').textContent=state.diagnostic || (state.status === 'ready' ? 'Ready.' : state.status === 'completed' ? 'Checks complete.' : state.status === 'paused' ? 'Paused. The current search may finish; Continue resumes the remaining checks.' : 'Checking current record.');
 
-      const queryGroups = {banner:['banner-exact-zip','banner-city','banner-wildcard-zip'],bannerState:['banner-state'],address:['address-city','address-state','address-zip','address-door','address-ordinal'],phone:['phone'],store:['store-banner']};
+      const queryGroups = {banner:['banner-exact-zip','banner-city','banner-wildcard-zip'],bannerState:['banner-state'],address:['address-city','address-state','address-zip','address-door'],phone:['phone'],store:['store-banner']};
       shadow.querySelectorAll('[data-search]').forEach(button => { const group=button.dataset.search; button.disabled=busy || !availablePlan.some(query => group==='all' || queryGroups[group]?.includes(query.type)); if(group==='store'){const query=availablePlan.find(query=>query.type==='store-banner');button.title=query?'Store #'+query.fields.storeNumber+' + '+query.fields.banner:'Store search requires a store number and a usable banner';} });
       const manualRequired = !state.source && !!state.diagnostic;
       $('.notice').dataset.tone = manualRequired ? 'warning' : 'info';

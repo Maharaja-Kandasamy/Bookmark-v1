@@ -345,9 +345,9 @@ test('Address button includes the extra full hyphenated-door search without fina
 });
 
 
-test('native Address checks include ordinal spelling fallback while keeping existing checks',async()=>{
+test('native Address checks exclude written ordinal street words',async()=>{
  const submitted=[];const {controller}=setup({PickerDuplicateEngine:require('../vendor/duplicate-engine'),PickerGsrsTableAdapter:{extractFromDocument:()=>({profile:'storeView',source:{slId:'SRC',address:'1875 East Third Street 18 Williamsport PA',city:'Williamsport',state:'PA',zip:'17701'}})},PickerManualMatchAdapter:{execute:async q=>{submitted.push(q);return {status:'complete',rows:[]};}}});
- const result=await controller.run('address');assert.equal(result.status,'completed');assert.equal(submitted.length,4);
- assert.equal(submitted.find(q=>q.type==='address-city').fields.address,'187*thi*');
- assert.deepEqual(submitted.find(q=>q.type==='address-ordinal').fields,{address:'*3rd*',city:'Williamsport'});
+ const result=await controller.run('address');assert.equal(result.status,'completed');assert.equal(submitted.length,3);
+ assert.equal(submitted.find(q=>q.type==='address-city').fields.address,'*187*');
+ assert.equal(submitted.some(q=>q.type==='address-ordinal'),false);
 });

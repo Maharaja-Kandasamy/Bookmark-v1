@@ -484,7 +484,7 @@ test('address searches omit ordinal floors and basement details even when pasted
   const queries=engine.createSearchPlan({address,city:'Austin',state:'TX',zip:'78701'}).filter(q=>q.fields.address);
   assert.equal(queries.length,3);queries.forEach(q=>assert.equal(q.fields.address,'37*ma*'));
  }
- assert.equal(engine.addressWildcard('123 First Street'),'12*fir*');
+ assert.equal(engine.addressWildcard('123 First Street'),'*12*');
  assert.equal(engine.addressWildcard('123 Basement Road'),'12*baseme*');
  assert.equal(engine.splitAddress('376 S Main St Apt 12').unitKey,'12');
 });
@@ -525,19 +525,57 @@ test('hyphenated doors stay complete while an intervening suite letter is exclud
 });
 
 
-test('ordinal street fallback searches numeric spelling with one numeric component',()=>{
- for(const [street,expected] of [['Third','*3rd*'],['First','*1st*'],['Second','*2nd*'],['Eleventh','*11th*'],['Twelfth','*12th*'],['Thirteenth','*13th*'],['Twenty Third','*23rd*'],['Thirty-First','*31st*'],['Ninetieth','*90th*'],['3rd','*3rd*']]){
-  const plan=engine.createSearchPlan({address:'1875 East '+street+' Street 18 Williamsport PA',city:'Williamsport',state:'PA',zip:'17701'});
-  assert.equal(plan.find(q=>q.type==='address-ordinal').fields.address,expected,street);
-  assert.equal(plan.find(q=>q.type==='address-ordinal').fields.city,'Williamsport');
+test('written ordinal words are removed from addresses without adding numeric spelling searches',()=>{
+ for(const street of ['First','Second','Third','Eleventh','Twelfth','Thirteenth','Twenty Third','Thirty-First','Ninetieth','Hundredth']){
+  const address='1875 East '+street+' Street 18 Williamsport PA';
+  assert.equal(engine.addressWildcard(address),'*187*',street);
+  const plan=engine.createSearchPlan({address,city:'Williamsport',state:'PA',zip:'17701'});
+  assert.equal(plan.filter(q=>q.fields.address).length,3);
+  plan.filter(q=>q.fields.address).forEach(q=>assert.equal(q.fields.address,'*187*'));
+  assert.equal(plan.some(q=>q.type==='address-ordinal'),false);
  }
- assert.equal(engine.createSearchPlan({address:'1875 Main St Third Floor',city:'Austin'}).some(q=>q.type==='address-ordinal'),false);
+ assert.equal(engine.addressWildcard('123 First Oak Road'),'12*o*');
+ assert.equal(engine.addressWildcard('73-4354 B Third Mamalahoa Hwy'),'73*4354*mamalah*');
 });
-
 test('submitted banner searches always have both wildcard boundaries and exclude close status tokens',()=>{
  for(const bannerName of ['Quick Stop','Quick Stop close','CLOSE Quick Stop','Quick Stop CLOSED','7-11 close','76']){
   const queries=engine.createSearchPlan({bannerName,storeNumber:'12',city:'Austin',state:'TX',zip:'78701'}).filter(q=>q.fields.banner);
   assert.ok(queries.length);for(const q of queries){assert.match(q.fields.banner,/^\*.*\*$/);assert.doesNotMatch(q.fields.banner,/close|\s|\*\*/i);}
  }
  assert.ok(engine.bannerSearchWords('Closeout Market').includes('closeout'));
+});
+
+
+test('banner status words and phrases are excluded while business-name substrings and identity remain intact',()=>{
+ const statuses=['OPEN','OP','Close','Closed','Reopened','Temporarily Closed','Temp Closed','Permanently Closed','Perm Closed','Opening Soon','Re Opening Soon','Closing Soon','Now Open','Currently Closed','Out of Business','No Longer Operating','Status: Active','Store Status: Unverified','Status=Duplicate'];
+ for(const status of statuses){
+  const bannerName='Quick Stop ('+status+')';
+  const queries=engine.createSearchPlan({bannerName,city:'Austin',state:'TX',zip:'78701',storeNumber:'12'}).filter(q=>q.fields.banner);
+  assert.ok(queries.length);for(const query of queries)assert.equal(query.fields.banner,'*quic*stop*',status);
+  assert.equal(engine.normalizeSource({bannerName}).bannerName,bannerName);
+ }
+ assert.deepEqual(engine.bannerSearchWords('OpenRoad Closeout OPUS Cooperative'),['openroad','closeout','opus','cooperative']);
+ assert.equal(engine.addressWildcard('123 Open Road'),'12*op*');
+});
+
+test('numeric street words do not create a supplemental numeric street search',()=>{
+ for(const street of ['3','3rd','101st','112th','9999th']){
+  const plan=engine.createSearchPlan({address:'1875 E '+street+' Street Suite 18',city:'Williamsport'});
+  assert.equal(plan.some(q=>q.type==='address-ordinal'),false);
+  assert.equal(plan.find(q=>q.type==='address-city').fields.address,'*187*');
+ }
+});
+
+
+test('whole numeric-bearing words are removed from banner and street-name searches',()=>{
+ for(const token of ['ABC123','123ABC','A1B2','ABC-123']){
+  const plan=engine.createSearchPlan({bannerName:'Quick Stop '+token,city:'Austin',state:'TX',zip:'78701',storeNumber:'12'});
+  plan.filter(q=>q.fields.banner).forEach(q=>assert.equal(q.fields.banner,'*quic*stop*',token));
+ }
+ for(const address of ['123 Main2 Road','123 A1B2 Road','123 2nd Street Apt 22'])assert.equal(engine.addressWildcard(address),'*12*');
+ assert.equal(engine.addressWildcard('123 Main2 Oak Road'),'12*o*');
+ assert.equal(engine.addressWildcard('2233 RT 878 STE 22'),'*223*');
+ assert.equal(engine.addressWildcard('RT 878 STE 22'),'*878*');
+ assert.equal(engine.addressWildcard('73-4354 B Mamalahoa Hwy'),'73*4354*mamalah*');
+ for(const [banner,pattern] of [['7-11','*eleven*'],['BW3','*bw3*'],['76','*76*']])engine.createSearchPlan({bannerName:banner,city:'Austin'}).filter(q=>q.fields.banner).forEach(q=>assert.equal(q.fields.banner,pattern));
 });
