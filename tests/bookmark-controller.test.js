@@ -313,3 +313,23 @@ test('an interrupted run still closes its filter session exactly once',async()=>
  const {controller}=setup({PickerManualMatchAdapter:{beginSearchSession:()=>session,endSearchSession:()=>{ends++;return {ok:true};},execute:async()=>{throw Error('Host changed');}}});
  assert.equal((await controller.run()).status,'incomplete');assert.equal(ends,1);
 });
+
+
+test('record monitoring starts only on Next or Previous Record clicks and stops after loading',()=>{
+ let reads=0,click,observerCount=0,intervals=0,source={slId:'OLD',bannerName:'Old'};const timers=new Map();let id=0,observer;
+ class Observer{constructor(callback){this.callback=callback;observer=this;observerCount++;}observe(){}disconnect(){this.disconnected=true;}}
+ const win={MutationObserver:Observer,setTimeout(fn,delay){const key=++id;timers.set(key,{fn:()=>{timers.delete(key);fn();},delay});return key;},clearTimeout(key){timers.delete(key);},setInterval(){intervals++;}};
+ let state={};const store={get:()=>state,set:patch=>state={...state,...patch},destroy(){}};
+ const cleanup=[];const lifecycle={listen(_doc,type,handler){assert.equal(type,'click');click=handler;},add(fn){cleanup.push(fn);},dispose(){cleanup.forEach(fn=>fn());}};
+ const dependencies={PickerDuplicateEngine:{normalizeZip:value=>value},PickerGsrsTableAdapter:{extractFromDocument:()=>{reads++;return {profile:'storeView',source};}},PickerManualMatchAdapter:{},PickerRunController:{}};
+ const context={globalThis:dependencies,AbortController,setTimeout,clearTimeout};vm.runInNewContext(fs.readFileSync(file,'utf8'),context);
+ const controller=dependencies.PickerBookmarkController.create({document:{documentElement:{},addEventListener(){}},window:win,store,lifecycle});
+ controller.scan();assert.equal(reads,1);assert.equal(observerCount,0);assert.equal(intervals,0);assert.equal(timers.size,0);
+ click({target:{closest:()=>null}});assert.equal(observerCount,0);
+ const button={closest:()=>({}),getAttribute:()=>null};
+ click({target:{closest:()=>button}});assert.equal(observerCount,1);assert.equal(state.source,null);assert.equal(state.results.length,0);
+ source={slId:'NEW',bannerName:'New'};
+ const pending=[...timers.values()].find(timer=>timer.delay===100);pending.fn();
+ assert.equal(state.source.slId,'NEW');assert.equal(observer.disconnected,true);assert.equal(timers.size,0);assert.equal(intervals,0);
+ click({target:{closest:()=>button}});assert.equal(observerCount,2);controller.destroy();assert.equal(observer.disconnected,true);assert.equal(timers.size,0);
+});

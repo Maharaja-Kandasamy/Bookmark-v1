@@ -44,33 +44,59 @@
       } catch { return {error:'source-read-failed',diagnostic:'The current record could not be read. Refresh the Manual screen and retry.'}; }
     }
     function refresh() {
-      if (destroyed) return;
+      if (destroyed || navigation) return;
       const found = readSource(false);
       if (found.error) {
         if (extraction || store.get()?.source) scan(found);
       } else if (signature(found) !== signature(extraction)) scan();
     }
-    // Ignore result/filter animation updates; source edits and record selection remain immediate.
-    if (win.MutationObserver && doc.documentElement && lifecycle.observe) {
-      let pending = null;
-      const ignored = '[data-testid="manual-match-search-table"],.horizontalPanelMM,#picker-bookmark-v1-host';
-      const observer = new win.MutationObserver(records => {
-        const relevant = records.some(record => {
-          const element = record.target.nodeType===1?record.target:record.target.parentElement;
-          if (element?.closest?.(ignored)) return false;
-          if (record.type==='attributes' || record.type==='characterData') return !!element?.closest?.('[data-testid="manual-match-table"]');
-          return true;
+    // Monitor a record transition only after the user activates Next/Previous Record.
+    let navigation = null;
+    function stopNavigation() {
+      if(!navigation)return;
+      navigation.observer?.disconnect();
+      win.clearTimeout(navigation.pending);
+      win.clearTimeout(navigation.deadline);
+      navigation=null;
+    }
+    function onRecordNavigation(event) {
+      const target=event.target?.closest?.('[title="Next Record"],[title="Previous Record"],.forwardIconStyleMM,.backIconStyleMM,[aria-label="Next Record"],[aria-label="Previous Record"]');
+      if(!target || target.disabled || target.getAttribute?.('aria-disabled')==='true')return;
+      if(!target.closest?.('.modal-content-cls'))return;
+      stopNavigation();
+      const previous=signature(extraction);
+      invalidate();
+      store.set({status:'waiting',source:null,results:[],observations:[],plan:[],tdIds:[],linksSearch:null,activeQuery:null,progress:0,total:0,diagnostic:'Waiting for the selected record to load...'});
+      const transition={observer:null,pending:null,deadline:null};
+      navigation=transition;
+      const check=()=>{
+        transition.pending=null;
+        if(destroyed || navigation!==transition)return;
+        const found=readSource(false);
+        if(found?.error || signature(found)===previous)return;
+        stopNavigation();scan(found);
+      };
+      if(win.MutationObserver && doc.documentElement){
+        transition.observer=new win.MutationObserver(records=>{
+          if(navigation!==transition || transition.pending!=null)return;
+          const relevant=records.some(record=>{
+            const element=record.target.nodeType===1?record.target:record.target.parentElement;
+            if(element?.closest?.('[data-testid="manual-match-search-table"],.horizontalPanelMM,#picker-bookmark-v1-host'))return false;
+            return !!element?.closest?.('[data-testid="manual-match-table"]') || [...(record.addedNodes || [])].some(node=>node.matches?.('[data-testid="manual-match-table"]') || node.querySelector?.('[data-testid="manual-match-table"]'));
+          });
+          if(relevant)transition.pending=win.setTimeout(check,100);
         });
-        if (!relevant || pending != null) return;
-        pending = win.setTimeout(() => { pending=null; refresh(); },100);
-      });
-      lifecycle.observe(observer,doc.documentElement,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['class','aria-selected','data-selected']});
-      lifecycle.add(() => win.clearTimeout(pending));
+        transition.observer.observe(doc.documentElement,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['class','aria-selected','data-selected']});
+      }
+      transition.pending=win.setTimeout(check,100);
+      transition.deadline=win.setTimeout(()=>{
+        if(navigation!==transition)return;
+        stopNavigation();
+        store.set({status:'incomplete',source:null,diagnostic:'The next record did not finish loading. Wait for the page, then activate Picker again.'});
+      },queryTimeoutMs);
     }
-    if (win.setInterval && lifecycle.add) {
-      const timer = win.setInterval(() => {if(!doc.hidden)refresh();},2500);
-      lifecycle.add(() => win.clearInterval(timer));
-    }
+    if(lifecycle.listen && doc.addEventListener)lifecycle.listen(doc,'click',onRecordNavigation,true);
+    lifecycle.add?.(stopNavigation);
 
     function scan(found = readSource()) {
       if (destroyed) return { error: 'bookmark-destroyed' };
@@ -88,6 +114,7 @@
     }
 
     async function runChecks(group = 'all') {
+      if(navigation)return {status:'incomplete',observations:[],diagnostic:'Wait for the selected record to load before searching.'};
       // Existing table rows may belong to a previous search. Start with source data only.
       scan(readSource(false));
       const runRevision = revision;
