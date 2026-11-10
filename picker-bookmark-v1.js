@@ -200,7 +200,7 @@
       .replace(/\b[^\s@]+@[^\s@]+\.[^\s@]+\b/g, ' ')
       .replace(/\bBW3\b/gi, ' bwthreeplaceholder ').replace(/\d+/g, ' ').replace(/bwthreeplaceholder/g, 'bw3')
       .replace(/&/g, ' ');
-    const words = normalizeWords(text).split(' ').filter(word => word.length > 1 && !/^\d{7,}$/.test(word) && !['undefined','null','nan','and'].includes(word));
+    const words = normalizeWords(text).split(' ').filter(word => word.length > 1 && !/^\d{7,}$/.test(word) && !['undefined','null','nan','and','close','closed'].includes(word));
     return normalizeBanner(words.join(' ')).split(' ').filter(word => word.length > 1 && !bannerDescriptors.has(word));
   }
 
@@ -279,22 +279,41 @@
     };
   }
 
+  function ordinalStreetSearch(value) {
+    const units=['first','second','third','fourth','fifth','sixth','seventh','eighth','ninth'];
+    const small=[...units,'tenth','eleventh','twelfth','thirteenth','fourteenth','fifteenth','sixteenth','seventeenth','eighteenth','nineteenth'];
+    const tens=['twenty','thirty','forty','fifty','sixty','seventy','eighty','ninety'];
+    const exactTens=['twentieth','thirtieth','fortieth','fiftieth','sixtieth','seventieth','eightieth','ninetieth'];
+    const names=[...tens.map(t=>t+' (?:'+units.join('|')+')'),...small,...exactTens].join('|');
+    const match=new RegExp('\\b('+names+'|\\d{1,4}(?:st|nd|rd|th))\\s+(?:street|st|avenue|ave|road|rd|drive|dr|lane|ln|boulevard|blvd|highway|hwy|court|ct|place|pl|way|terrace|ter)\\b','i').exec(normalizeWords(splitAddress(value).base));
+    if(!match)return '';
+    const token=match[1].toLowerCase();let number;
+    if(/^\d/.test(token))number=parseInt(token,10);
+    else if(small.includes(token))number=small.indexOf(token)+1;
+    else if(exactTens.includes(token))number=(exactTens.indexOf(token)+2)*10;
+    else {const parts=token.split(' ');number=(tens.indexOf(parts[0])+2)*10+units.indexOf(parts[1])+1;}
+    const suffix=number%100>=11 && number%100<=13?'th':({1:'st',2:'nd',3:'rd'}[number%10] || 'th');
+    return '*'+number+suffix+'*';
+  }
+  const wrapBannerSearch = value => value?'*'+value.replace(/^\*+|\*+$/g,'')+'*':'';
   function createSearchPlan(raw) {
     const source = normalizeSource(raw);
-    const bannerWildcard = wildcardWords(source.bannerName, 'banner');
+    const bannerWildcard = wrapBannerSearch(wildcardWords(source.bannerName, 'banner'));
     const addressWildcard = wildcardWords(source.address, 'address');
-    const storeBanner = source.storeNumber ? storeBannerWildcard(source) : '';
+    const storeBanner = source.storeNumber ? wrapBannerSearch(storeBannerWildcard(source)) : '';
+    const ordinalStreet = ordinalStreetSearch(source.address);
     const compositeDoor = hyphenatedDoor(source.address);
     const bannerNeedsWildcard = /[0-9]|[^a-z0-9\s]|\band\b/i.test(source.bannerName);
     const candidates = [
       bannerWildcard && source.city && { type: 'banner-city', label: 'Wildcard banner + city', fields: { banner: bannerWildcard, city: source.city } },
-      !bannerNeedsWildcard && bannerWildcard && source.zip3 && { type: 'banner-exact-zip', label: 'Exact banner + ZIP3', fields: { banner: bannerSearchWords(source.bannerName).join(' '), zip: source.zip3 } },
+      !bannerNeedsWildcard && bannerWildcard && source.zip3 && { type: 'banner-exact-zip', label: 'Full banner words + ZIP3', fields: { banner: wrapBannerSearch(bannerSearchWords(source.bannerName).join('*')), zip: source.zip3 } },
       bannerWildcard && cleanText(source.state) && { type: 'banner-state', label: 'Wildcard banner + state', fields: { banner: bannerWildcard, state: cleanText(source.state) } },
       bannerWildcard && source.zip3 && { type: 'banner-wildcard-zip', label: 'Wildcard banner + ZIP3', fields: { banner: bannerWildcard, zip: source.zip3 } },
       addressWildcard && source.city && { type: 'address-city', label: 'Wildcard address + city', fields: { address: addressWildcard, city: source.city } },
       addressWildcard && cleanText(source.state) && { type: 'address-state', label: 'Wildcard address + state', fields: { address: addressWildcard, state: cleanText(source.state) } },
       addressWildcard && source.zip3 && { type: 'address-zip', label: 'Wildcard address + ZIP3', fields: { address: addressWildcard, zip: source.zip3 } },
       compositeDoor && {type:'address-door',label:'Full hyphenated door number',fields:{address:'*'+compositeDoor.door.replace(/[^a-z0-9]+/gi,'*')+'*',...(source.city?{city:source.city}:cleanText(source.state)?{state:cleanText(source.state)}:source.zip3?{zip:source.zip3}:{})}},
+      ordinalStreet && {type:'address-ordinal',label:'Numbered street spelling',fields:{address:ordinalStreet,...(source.city?{city:source.city}:source.zip3?{zip:source.zip3}:cleanText(source.state)?{state:cleanText(source.state)}:{})}},
       source.phone7 && { type: 'phone', label: 'Last 7 phone digits', fields: { phone: source.phone7 } },
       source.storeNumber && storeBanner && { type: 'store-banner', label: 'Store number + main banner', fields: { storeNumber: source.storeNumber, banner: storeBanner } }
     ].filter(Boolean);
@@ -1299,7 +1318,7 @@
       const current = store.get();
       if (!current?.source) return { status: 'error', observations: [], diagnostic: current?.diagnostic || 'Source table not found' };
       store.set({searchGroup:group});
-      const groups = { banner: ['banner-exact-zip','banner-city','banner-wildcard-zip'], bannerState: ['banner-state'], address: ['address-city','address-state','address-zip','address-door'], phone: ['phone'], store: ['store-banner'] };
+      const groups = { banner: ['banner-exact-zip','banner-city','banner-wildcard-zip'], bannerState: ['banner-state'], address: ['address-city','address-state','address-zip','address-door','address-ordinal'], phone: ['phone'], store: ['store-banner'] };
       const plan = Engine.createSearchPlan(current.source).filter(query => group === 'all' || groups[group]?.includes(query.type));
       if (!plan.length) {
         const result = { status: 'incomplete', observations: [], progress: 0, total: 0, diagnostic: 'Not enough source data to create searches' };
@@ -1546,7 +1565,7 @@
       $('.google-banner-city').disabled = !source.bannerName || !source.city;
       $('.notice').textContent=state.diagnostic || (state.status === 'ready' ? 'Ready.' : state.status === 'completed' ? 'Checks complete.' : state.status === 'paused' ? 'Paused. The current search may finish; Continue resumes the remaining checks.' : 'Checking current record.');
 
-      const queryGroups = {banner:['banner-exact-zip','banner-city','banner-wildcard-zip'],bannerState:['banner-state'],address:['address-city','address-state','address-zip','address-door'],phone:['phone'],store:['store-banner']};
+      const queryGroups = {banner:['banner-exact-zip','banner-city','banner-wildcard-zip'],bannerState:['banner-state'],address:['address-city','address-state','address-zip','address-door','address-ordinal'],phone:['phone'],store:['store-banner']};
       shadow.querySelectorAll('[data-search]').forEach(button => { const group=button.dataset.search; button.disabled=busy || !availablePlan.some(query => group==='all' || queryGroups[group]?.includes(query.type)); if(group==='store'){const query=availablePlan.find(query=>query.type==='store-banner');button.title=query?'Store #'+query.fields.storeNumber+' + '+query.fields.banner:'Store search requires a store number and a usable banner';} });
       const manualRequired = !state.source && !!state.diagnostic;
       $('.notice').dataset.tone = manualRequired ? 'warning' : 'info';

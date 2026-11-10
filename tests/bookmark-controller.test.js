@@ -167,7 +167,7 @@ test('banner store number fills the bot source and drives the store search witho
  assert.equal(store.get().source.storeNumber,'00123');
  assert.equal(store.get().source.storeNumberInferred,true);
  assert.equal(result.plan[0].fields.storeNumber,'00123');
- assert.equal(result.plan[0].fields.banner,'acme*');
+ assert.equal(result.plan[0].fields.banner,'*acme*');
  assert.equal(source.storeNumber,'');
 });
 
@@ -260,9 +260,9 @@ test('All Search submits only the top five unique TDs from its own completed sea
   PickerBookmarkLinks:{execute:async ids=>{submissions.push([...ids]);return {status:'complete'};}}
  });
  const result=await controller.run('all');
- assert.equal(sequence,9);assert.equal(submissions.length,1);assert.deepEqual(submissions[0],['0000001','0000002','0000003','0000004','0000005']);
+ assert.equal(sequence,8);assert.equal(submissions.length,1);assert.deepEqual(submissions[0],['0000001','0000002','0000003','0000004','0000005']);
  assert.equal(result.results.some(row=>row.candidate.slId==='9999999'),false);
- assert.equal(result.status,'completed');assert.equal(result.total,10);
+ assert.equal(result.status,'completed');assert.equal(result.total,9);
 });
 
 test('empty or incomplete current searches cannot reuse previous TDs or trigger final lookup',async()=>{
@@ -342,4 +342,12 @@ test('Address button includes the extra full hyphenated-door search without fina
  assert.equal(result.status,'completed');assert.equal(submitted.length,4);
  assert.deepEqual(submitted.find(q=>q.type==='address-door').fields,{address:'*73*4354*',city:'Kailua Kona'});
  assert.equal(td,0);
+});
+
+
+test('native Address checks include ordinal spelling fallback while keeping existing checks',async()=>{
+ const submitted=[];const {controller}=setup({PickerDuplicateEngine:require('../vendor/duplicate-engine'),PickerGsrsTableAdapter:{extractFromDocument:()=>({profile:'storeView',source:{slId:'SRC',address:'1875 East Third Street 18 Williamsport PA',city:'Williamsport',state:'PA',zip:'17701'}})},PickerManualMatchAdapter:{execute:async q=>{submitted.push(q);return {status:'complete',rows:[]};}}});
+ const result=await controller.run('address');assert.equal(result.status,'completed');assert.equal(submitted.length,4);
+ assert.equal(submitted.find(q=>q.type==='address-city').fields.address,'187*thi*');
+ assert.deepEqual(submitted.find(q=>q.type==='address-ordinal').fields,{address:'*3rd*',city:'Williamsport'});
 });

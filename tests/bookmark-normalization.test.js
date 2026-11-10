@@ -13,7 +13,7 @@ test('business suffixes are removed from wildcard and comparison keys', () => {
   const plan = engine.createSearchPlan({bannerName:'Acme Ltd',address:'20 Mount Oak Road',city:'Austin',zip:'78701'});
   assert.equal(plan.find(q=>q.type==='address-city').fields.address,'2*o*');
   assert.equal(plan.find(q=>q.type==='address-zip').fields.address,'2*o*');
-  assert.equal(plan.find(q=>q.type==='banner-wildcard-zip').fields.banner,'acme*');
+  assert.equal(plan.find(q=>q.fields.banner && q.fields.zip).fields.banner,'*acme*');
 });
 
 test('consolidation preserves each record status and fills missing status from later searches', () => {
@@ -32,7 +32,7 @@ test('ZIP base is padded before ZIP3 search, including short ZIP+4 inputs', () =
   assert.equal(engine.normalizeSource({zip:input}).zip,expected,input);
   assert.equal(engine.createZip3(input),expected.slice(0,3)+'*',input);
   const searches=engine.createSearchPlan({bannerName:'Acme',address:'12 Main Road',city:'Austin',zip:input}).filter(q=>q.fields.zip);
-  assert.equal(searches.length,3);
+  assert.equal(searches.length,2);
   searches.forEach(q=>assert.equal(q.fields.zip,expected.slice(0,3)+'*'));
  }
  for(const input of ['',null,undefined,'-7678']){assert.equal(engine.normalizeZip(input),'');assert.equal(engine.createZip3(input),'');}
@@ -75,7 +75,7 @@ test('Wren example produces the confirmed primary street search and banner wildc
  assert.equal(engine.normalizeBanner('Wren S Nest Baking Co'),engine.normalizeBanner('Wrens Nest Baking'));
  assert.equal(engine.normalizeBanner("Wren's Nest Baking Co"),engine.normalizeBanner('Wrens Nest Baking'));
  const plan=engine.createSearchPlan({bannerName:'Wren S Nest Baking Co',address,city:'Ruston',zip:'98407'});
- assert.equal(plan.find(q=>q.type==='banner-exact-zip').fields.banner,'wren nest baking');
+ assert.equal(plan.find(q=>q.type==='banner-exact-zip').fields.banner,'*wren*nest*baking*');
  for(const query of plan.filter(q=>q.fields.address))assert.equal(query.fields.address,'512*pea*');
 });
 
@@ -125,9 +125,9 @@ test('single-character banner tokens and special characters become clean wildcar
   assert.equal(engine.createSearchPlan({bannerName:raw,zip:'98407',storeNumber:'7'}).length,0);
  }
  const plan=engine.createSearchPlan({bannerName:'Circle @ K',zip:'98407',storeNumber:'7'});
- assert.equal(plan.find(q=>q.type==='banner-wildcard-zip').fields.banner,'circle*');
- assert.equal(plan.find(q=>q.type==='banner-wildcard-zip').fields.banner,'circle*');
- assert.equal(plan.find(q=>q.type==='store-banner').fields.banner,'circle*');
+ assert.equal(plan.find(q=>q.type==='banner-wildcard-zip').fields.banner,'*circle*');
+ assert.equal(plan.find(q=>q.type==='banner-wildcard-zip').fields.banner,'*circle*');
+ assert.equal(plan.find(q=>q.type==='store-banner').fields.banner,'*circle*');
 });
 
 test('store number is inferred from a single banner hashtag only when the field is blank',()=>{
@@ -135,7 +135,7 @@ test('store number is inferred from a single banner hashtag only when the field 
   const source=engine.normalizeSource({bannerName,storeNumber:' '});
   assert.equal(source.storeNumber,'00123');assert.equal(source.storeNumberInferred,true);
   const query=engine.createSearchPlan({bannerName}).find(q=>q.type==='store-banner');
-  assert.equal(query.fields.storeNumber,'00123');assert.equal(query.fields.banner,'circle*');
+  assert.equal(query.fields.storeNumber,'00123');assert.equal(query.fields.banner,'*circle*');
  }
  const explicit=engine.normalizeSource({bannerName:'Circle K #00123',storeNumber:'99'});
  assert.equal(explicit.storeNumber,'99');assert.equal(explicit.storeNumberInferred,false);
@@ -159,8 +159,8 @@ test('standalone and becomes one wildcard boundary while words containing and ar
  assert.equal(engine.wildcardWords('Candy','banner'),'candy*');
  assert.equal(engine.wildcardWords('and','banner'),'');
  const plan=engine.createSearchPlan({bannerName:'Bread and Butter',zip:'98407',storeNumber:'7'});
- assert.equal(plan.find(q=>q.type==='banner-wildcard-zip').fields.banner,'brea*butt*');
- assert.equal(plan.find(q=>q.type==='store-banner').fields.banner,'brea*butt*');
+ assert.equal(plan.find(q=>q.type==='banner-wildcard-zip').fields.banner,'*brea*butt*');
+ assert.equal(plan.find(q=>q.type==='store-banner').fields.banner,'*brea*butt*');
 });
 
 test('numbers and removed prefixes keep their wildcard position in banner searches',()=>{
@@ -216,7 +216,7 @@ test('generic business descriptors are omitted from every banner search without 
   const plan=engine.createSearchPlan({bannerName,zip:'46805',storeNumber:'5'});
   assert.ok(plan.some(q=>q.type==='banner-wildcard-zip'));
   assert.ok(plan.some(q=>q.type==='store-banner'));
-  plan.filter(q=>q.fields.banner).forEach(q=>assert.equal(q.fields.banner,'quic*stop*'));
+  plan.filter(q=>q.fields.banner).forEach(q=>assert.equal(q.fields.banner,'*quic*stop*'));
  }
  assert.equal(engine.wildcardWords('Quick Shop Stop','banner'),'quic*stop*');
  assert.equal(engine.wildcardWords('Shop Quick Stop','banner'),'*quic*stop*');
@@ -228,14 +228,14 @@ test('generic business descriptors are omitted from every banner search without 
  assert.equal(source.bannerKey,'quick stop c store 5');
  assert.equal(source.storeNumber,'');
  const cleanPlan=engine.createSearchPlan({bannerName:'Quick Stop Store',zip:'46805'});
- assert.equal(cleanPlan.find(q=>q.type==='banner-exact-zip').fields.banner,'quick stop');
+ assert.equal(cleanPlan.find(q=>q.type==='banner-exact-zip').fields.banner,'*quick*stop*');
 });
 
 
 test('banner plus state has its own query without requiring a ZIP',()=>{
  const plan=engine.createSearchPlan({bannerName:'QUICK STOP C STORE 5',state:'IN'});
  assert.deepEqual(plan.map(q=>q.type),['banner-state']);
- assert.deepEqual(plan[0].fields,{banner:'quic*stop*',state:'IN'});
+ assert.deepEqual(plan[0].fields,{banner:'*quic*stop*',state:'IN'});
  assert.equal(engine.createSearchPlan({bannerName:'Quick Stop'}).some(q=>q.type==='banner-state'),false);
 });
 
@@ -300,7 +300,7 @@ test('Store search extracts main banner patterns without a brand-name list',()=>
  ]){
   const raw={bannerName,address,storeNumber:'5'};
   assert.equal(engine.storeBannerWildcard(raw),expected,bannerName);
-  assert.equal(engine.createSearchPlan(raw).find(q=>q.type==='store-banner').fields.banner,expected,bannerName);
+  assert.equal(engine.createSearchPlan(raw).find(q=>q.type==='store-banner').fields.banner,'*'+expected.replace(/^\*+/,''),bannerName);
   assert.equal(raw.bannerName,bannerName);
  }
  assert.equal(engine.storeBannerWildcard({bannerName:'Store LLC #5'}),'');
@@ -357,9 +357,9 @@ test('unit-only number searches never claim an exact full address and unit match
 
 test('Banner checks include cleaned banner plus city without requiring a ZIP',()=>{
  const plan=engine.createSearchPlan({bannerName:'QUICK STOP C STORE #5',city:'  Fort   Wayne  ',zip:'46805'});
- assert.deepEqual(plan.find(q=>q.type==='banner-city').fields,{banner:'quic*stop*',city:'Fort Wayne'});
+ assert.deepEqual(plan.find(q=>q.type==='banner-city').fields,{banner:'*quic*stop*',city:'Fort Wayne'});
  const noZip=engine.createSearchPlan({bannerName:'Quick Stop',city:'Fort Wayne'});
- assert.deepEqual(noZip.map(q=>q.type),['banner-city']);assert.deepEqual(noZip[0].fields,{banner:'quic*stop*',city:'Fort Wayne'});
+ assert.deepEqual(noZip.map(q=>q.type),['banner-city']);assert.deepEqual(noZip[0].fields,{banner:'*quic*stop*',city:'Fort Wayne'});
  assert.equal(engine.createSearchPlan({bannerName:'Quick Stop',zip:'46805'}).some(q=>q.type==='banner-city'),false);
 });
 
@@ -372,7 +372,7 @@ test('copied ZIP dash variations normalize before ZIP and search planning',()=>{
   assert.equal(engine.createZip3(zip),'009*');
   const plan=engine.createSearchPlan({bannerName:'Quick Stop C Store 5',address:'651 E State Blvd',city:'Fort Wayne',state:'IN',zip});
   plan.filter(q=>q.fields.zip).forEach(q=>assert.equal(q.fields.zip,'009*'));
-  assert.deepEqual(plan.find(q=>q.type==='banner-city').fields,{banner:'quic*stop*',city:'Fort Wayne'});
+  assert.deepEqual(plan.find(q=>q.type==='banner-city').fields,{banner:'*quic*stop*',city:'Fort Wayne'});
   assert.equal(engine.normalizePostal('987'+dash+'78'),'');
  }
 });
@@ -432,7 +432,7 @@ test('PO Box searches use only the complete box number with wildcard boundaries'
 test('native Banner plus City runs before ZIP checks so an earlier timeout cannot skip it',()=>{
  const plan=engine.createSearchPlan({bannerName:'Quick Stop',city:'Fort Wayne',zip:'46805'});
  assert.equal(plan[0].type,'banner-city');
- assert.deepEqual(plan[0].fields,{banner:'quic*stop*',city:'Fort Wayne'});
+ assert.deepEqual(plan[0].fields,{banner:'*quic*stop*',city:'Fort Wayne'});
 });
 
 
@@ -441,7 +441,7 @@ test('operational banner metadata is removed from native searches without erasin
   const bannerName='Applebees-'+suffix;
   assert.equal(engine.wildcardWords(bannerName,'banner'),'applebees*',suffix);
   const plan=engine.createSearchPlan({bannerName,storeNumber:'12',city:'Austin',state:'TX',zip:'78701'});
-  plan.filter(q=>q.fields.banner).forEach(q=>assert.equal(q.fields.banner,'applebees*'));
+  plan.filter(q=>q.fields.banner).forEach(q=>assert.equal(q.fields.banner,'*applebees*'));
  }
  assert.equal(engine.wildcardWords('Applebees Fintech','banner'),'applebees*');
  assert.equal(engine.wildcardWords('Fountain Cafe','banner'),'foun*cafe*');
@@ -494,7 +494,7 @@ test('address search includes at most one numeric component and prioritizes the 
  const cases=[['2233 rte 878 ste 22','*223*'],['233 1st st','*23*'],['2503D 22nd Avenue Apt 100','*2503*'],['123 Main 2nd Street Suite 22','12*ma*'],['2233 US HWY 878 STE 22','*223*'],['RT 878 STE 22','*878*'],['PO Box 12121 Suite 22','*12121*'],['BLDG 5207-5209','*5207*'],['376 S MAIN ST1ST FL374 S MAIN ST BSMT ONLY','37*ma*']];
  for(const [address,expected] of cases){
   assert.equal(engine.addressWildcard(address),expected,address);
-  const queries=engine.createSearchPlan({address,city:'Austin',state:'TX',zip:'78701'}).filter(q=>q.fields.address);
+  const queries=engine.createSearchPlan({address,city:'Austin',state:'TX',zip:'78701'}).filter(q=>q.fields.address && q.type!=='address-ordinal');
   assert.equal(queries.length,3);
   for(const query of queries){assert.equal(query.fields.address,expected);assert.ok((query.fields.address.match(/\d+/g)||[]).length<=1,address);}
  }
@@ -522,4 +522,22 @@ test('hyphenated doors stay complete while an intervening suite letter is exclud
  }
  const ranked=engine.consolidateCandidates({address:'73-4354 B Mamalahoa Hwy'},[{candidate:{slId:'2',address:'73-4354 Mamalahoa Hwy Suite C'}},{candidate:{slId:'1',address:'73-4354 Mamalahoa Hwy Suite B'}}]);
  assert.equal(ranked[0].candidate.slId,'1');assert.equal(ranked[0].exactUnitMatch,true);
+});
+
+
+test('ordinal street fallback searches numeric spelling with one numeric component',()=>{
+ for(const [street,expected] of [['Third','*3rd*'],['First','*1st*'],['Second','*2nd*'],['Eleventh','*11th*'],['Twelfth','*12th*'],['Thirteenth','*13th*'],['Twenty Third','*23rd*'],['Thirty-First','*31st*'],['Ninetieth','*90th*'],['3rd','*3rd*']]){
+  const plan=engine.createSearchPlan({address:'1875 East '+street+' Street 18 Williamsport PA',city:'Williamsport',state:'PA',zip:'17701'});
+  assert.equal(plan.find(q=>q.type==='address-ordinal').fields.address,expected,street);
+  assert.equal(plan.find(q=>q.type==='address-ordinal').fields.city,'Williamsport');
+ }
+ assert.equal(engine.createSearchPlan({address:'1875 Main St Third Floor',city:'Austin'}).some(q=>q.type==='address-ordinal'),false);
+});
+
+test('submitted banner searches always have both wildcard boundaries and exclude close status tokens',()=>{
+ for(const bannerName of ['Quick Stop','Quick Stop close','CLOSE Quick Stop','Quick Stop CLOSED','7-11 close','76']){
+  const queries=engine.createSearchPlan({bannerName,storeNumber:'12',city:'Austin',state:'TX',zip:'78701'}).filter(q=>q.fields.banner);
+  assert.ok(queries.length);for(const q of queries){assert.match(q.fields.banner,/^\*.*\*$/);assert.doesNotMatch(q.fields.banner,/close|\s|\*\*/i);}
+ }
+ assert.ok(engine.bannerSearchWords('Closeout Market').includes('closeout'));
 });
