@@ -333,3 +333,13 @@ test('record monitoring starts only on Next or Previous Record clicks and stops 
  assert.equal(state.source.slId,'NEW');assert.equal(observer.disconnected,true);assert.equal(timers.size,0);assert.equal(intervals,0);
  click({target:{closest:()=>button}});assert.equal(observerCount,2);controller.destroy();assert.equal(observer.disconnected,true);assert.equal(timers.size,0);
 });
+
+
+test('Address button includes the extra full hyphenated-door search without final TD lookup',async()=>{
+ const submitted=[];let td=0;
+ const {controller}=setup({PickerDuplicateEngine:require('../vendor/duplicate-engine'),PickerGsrsTableAdapter:{extractFromDocument:()=>({profile:'storeView',source:{slId:'SRC',address:'73-4354 B Mamalahoa Hwy',city:'Kailua Kona',state:'HI',zip:'96740'}})},PickerManualMatchAdapter:{execute:async query=>{submitted.push(query);return {status:'complete',rows:[]};}},PickerBookmarkLinks:{execute:()=>{td++;}}});
+ const result=await controller.run('address');
+ assert.equal(result.status,'completed');assert.equal(submitted.length,4);
+ assert.deepEqual(submitted.find(q=>q.type==='address-door').fields,{address:'*73*4354*',city:'Kailua Kona'});
+ assert.equal(td,0);
+});

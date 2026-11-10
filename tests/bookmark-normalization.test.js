@@ -501,3 +501,25 @@ test('address search includes at most one numeric component and prioritizes the 
  assert.equal(engine.splitAddress('2233 rte 878 ste 22').unitKey,'22');
  assert.ok(engine.normalizeAddress('2233 rte 878 ste 22').includes('878'));
 });
+
+
+test('hyphenated doors stay complete while an intervening suite letter is excluded from search',()=>{
+ for(const address of ['73-4354 B Mamalahoa Hwy','73 - 4354 b MAMALAHOA HIGHWAY','73–4354 B Mamalahoa Hwy']){
+  assert.equal(engine.addressWildcard(address),'73*4354*mamalah*');
+  assert.equal(engine.splitAddress(address).unitKey,'b');
+  const plan=engine.createSearchPlan({address,city:'Kailua Kona',state:'HI',zip:'96740'});
+  assert.equal(plan.filter(q=>q.fields.address).length,4);
+  assert.deepEqual(plan.find(q=>q.type==='address-door').fields,{address:'*73*4354*',city:'Kailua Kona'});
+  assert.equal(plan.find(q=>q.type==='address-city').fields.address,'73*4354*mamalah*');
+ }
+ assert.equal(engine.addressWildcard('73-4354 N Mamalahoa Hwy'),'73*4354*mamalah*');
+ assert.equal(engine.splitAddress('73-4354 N Mamalahoa Hwy').unitKey,'');
+ assert.equal(engine.addressWildcard('73-4354 Mamalahoa Hwy Suite B'),'73*4354*mamalah*');
+ assert.equal(engine.createSearchPlan({address:'2503D Forest Hills Rd',city:'Austin'}).some(q=>q.type==='address-door'),false);
+ for(const [source,location] of [[{state:'HI'},{state:'HI'}],[{zip:'96740'},{zip:'967*'}],[{},{}]]){
+  const query=engine.createSearchPlan({address:'73-4354 B Mamalahoa Hwy',...source}).find(q=>q.type==='address-door');
+  assert.deepEqual(query.fields,{address:'*73*4354*',...location});
+ }
+ const ranked=engine.consolidateCandidates({address:'73-4354 B Mamalahoa Hwy'},[{candidate:{slId:'2',address:'73-4354 Mamalahoa Hwy Suite C'}},{candidate:{slId:'1',address:'73-4354 Mamalahoa Hwy Suite B'}}]);
+ assert.equal(ranked[0].candidate.slId,'1');assert.equal(ranked[0].exactUnitMatch,true);
+});

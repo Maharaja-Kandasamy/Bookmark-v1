@@ -18,13 +18,21 @@
     const match=/^(?:building|bldg)[.\s:#-]*(?:(?:no\.?|number)\s*)?(\d+[a-z]?(?:-\d+[a-z]?)?)[.\s]*$/i.exec(cleanText(value));
     return match?match[1].toLowerCase():'';
   }
+  function hyphenatedDoor(value) {
+    const text=cleanText(value).replace(/[\u2010-\u2015\u2212\uFE58\uFE63\uFF0D]/g,'-');
+    const match=/^(\d+)\s*-\s*(\d+)(?:\s+([a-z])(?=\s+[a-z]{2,}))?(?:\s+(.+))?$/i.exec(text);
+    if(!match)return null;
+    const unit=match[3] && !/^[nsew]$/i.test(match[3])?match[3]:'';
+    return {door:match[1]+'-'+match[2],unit,street:((match[3] && !unit?match[3]+' ':'')+(match[4] || '')).trim()};
+  }
   function splitAddress(value) {
-    const text = cleanText(value);
+    const composite=hyphenatedDoor(value);
+    const text = composite?.unit ? composite.door+' '+composite.street : cleanText(value);
     const building=standaloneBuilding(text);
     if(building)return {base:'building '+building,unitKey:''};
     const unit = /(?:#|\b(?:suite|ste|unit|apt|apartment|room|rm|floor|fl(?![.\s:#-]*(?:rout|route|rt|rte|hwy|highway|road|rd|sr|cr)[.\s-]*\d)|building|bldg)\b[.\s:#-]*)\s*([a-z0-9]+(?:-[a-z0-9]+)?)/i.exec(text);
     const base = (unit ? text.slice(0, unit.index) : text).trim();
-    return { base, unitKey: unit ? normalizeWords(unit[1]) : '' };
+    return { base, unitKey: composite?.unit ? normalizeWords(composite.unit) : unit ? normalizeWords(unit[1]) : '' };
   }
   const normalizeAddress = value => normalizeWords(splitAddress(value).base).split(' ')
     .filter(Boolean).map(token => suffixes.get(token) || token).join(' ').trim();
@@ -145,6 +153,13 @@
     return numbers.length===1?numbers[0]:'';
   }
   function addressWildcard(value) {
+    const composite=hyphenatedDoor(value);
+    if(composite){
+      const {street}=addressSearchParts('1 '+composite.street);
+      const words=street.filter(word=>!/[0-9]/.test(word)).map(word=>word.slice(0,Math.max(1,word.length-2)));
+      const door=composite.door.replace(/[^a-z0-9]+/gi,'*');
+      return words.length?door+'*'+words.join('*')+'*':'*'+door+'*';
+    }
     const box = /^(?:p\s*\.?\s*o\s*\.?\s*box|post\s+office\s+box|pobox)\s*[.:#-]*\s*(\d+)\b/i.exec(cleanText(value));
     if(box)return '*'+box[1]+'*';
     const building=standaloneBuilding(value);
@@ -268,6 +283,7 @@
     const bannerWildcard = wildcardWords(source.bannerName, 'banner');
     const addressWildcard = wildcardWords(source.address, 'address');
     const storeBanner = source.storeNumber ? storeBannerWildcard(source) : '';
+    const compositeDoor = hyphenatedDoor(source.address);
     const bannerNeedsWildcard = /[0-9]|[^a-z0-9\s]|\band\b/i.test(source.bannerName);
     const candidates = [
       bannerWildcard && source.city && { type: 'banner-city', label: 'Wildcard banner + city', fields: { banner: bannerWildcard, city: source.city } },
@@ -277,6 +293,7 @@
       addressWildcard && source.city && { type: 'address-city', label: 'Wildcard address + city', fields: { address: addressWildcard, city: source.city } },
       addressWildcard && cleanText(source.state) && { type: 'address-state', label: 'Wildcard address + state', fields: { address: addressWildcard, state: cleanText(source.state) } },
       addressWildcard && source.zip3 && { type: 'address-zip', label: 'Wildcard address + ZIP3', fields: { address: addressWildcard, zip: source.zip3 } },
+      compositeDoor && {type:'address-door',label:'Full hyphenated door number',fields:{address:'*'+compositeDoor.door.replace(/[^a-z0-9]+/gi,'*')+'*',...(source.city?{city:source.city}:cleanText(source.state)?{state:cleanText(source.state)}:source.zip3?{zip:source.zip3}:{})}},
       source.phone7 && { type: 'phone', label: 'Last 7 phone digits', fields: { phone: source.phone7 } },
       source.storeNumber && storeBanner && { type: 'store-banner', label: 'Store number + main banner', fields: { storeNumber: source.storeNumber, banner: storeBanner } }
     ].filter(Boolean);
