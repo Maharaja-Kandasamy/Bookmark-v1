@@ -48,7 +48,7 @@
     const shell = $('.shell');
     const panel = $('.panel');
     const EMPTY_SOURCE = {}, EMPTY_RESULTS = [];
-    let renderedSource,renderedResults,renderedEmptyStatus,availablePlan=[],renderFrame=null,pendingState,positioned=false,anchorKey='';
+    let renderedSourceKey,renderedResults,renderedEmptyStatus,availablePlan=[],renderFrame=null,pendingState,positioned=false,anchorKey='';
     let open = false;
     let state = store.get() || {};
     let drag = null;
@@ -97,9 +97,10 @@
       if (!drag && state.status !== previousStatus) animateRobot(state.status === 'completed' ? 'celebrating' : restingMotion(), state.status === 'completed' ? 2400 : 0);
       previousStatus = state.status;
       const source = state.source || EMPTY_SOURCE;
-      const sourceChanged=source!==renderedSource;
+      const sourceKey=JSON.stringify([state.profile,source.bannerName,source.storeNumber,source.address,source.city,source.state,source.zip,source.phone]);
+      const sourceChanged=sourceKey!==renderedSourceKey;
       if(sourceChanged){
-      renderedSource=source;
+      renderedSourceKey=sourceKey;
       availablePlan=state.source?Engine.createSearchPlan(state.source):[];
       $('.source-name').textContent = source.bannerName || 'Manual screen required';
       $('.source-meta').textContent = [state.profile === 'retailSync' ? 'Retail' : 'Store', source.storeNumber && `Store #${source.storeNumber}${source.storeNumberInferred ? ' (from banner)' : ''}`, address()].filter(Boolean).join(' · ');
@@ -125,6 +126,19 @@
 
       const queryGroups = {banner:['banner-exact-zip','banner-city','banner-wildcard-zip'],bannerState:['banner-state'],address:['address-city','address-state','address-zip','address-door'],phone:['phone'],store:['store-banner']};
       shadow.querySelectorAll('[data-search]').forEach(button => { const group=button.dataset.search; button.disabled=busy || !availablePlan.some(query => group==='all' || queryGroups[group]?.includes(query.type)); if(group==='store'){const query=availablePlan.find(query=>query.type==='store-banner');button.title=query?'Store #'+query.fields.storeNumber+' + '+query.fields.banner:'Store search requires a store number and a usable banner';} });
+      const bannerPlan=availablePlan.filter(query=>queryGroups.banner.includes(query.type));
+      const bannerPattern=state.source?Engine.wildcardWords(source.bannerName,'banner'):'';
+      const bannerReason=busy?'A search is still running. Wait, pause, or stop it.'
+        : !source.bannerName?'Picker did not read a banner from the selected record.'
+        : !bannerPattern?'Banner cleanup left no usable business-name words.'
+        : !bannerPlan.length?'Banner search needs a city or valid ZIP. Use Banner + State if state is available.'
+        : '';
+      shadow.querySelectorAll('[data-search="banner"]').forEach(button=>{
+        button.title=bannerReason || 'GSRS banner searches: '+bannerPlan.map(query=>query.fields.banner+' · '+(query.fields.city || query.fields.zip || '')).join('; ');
+      });
+      if(!busy && state.source && !bannerPlan.length){
+        $('.notice').textContent=[state.diagnostic,'Banner unavailable: '+bannerReason].filter(Boolean).join(' ');
+      }
       const manualRequired = !state.source && !!state.diagnostic;
       $('.notice').dataset.tone = manualRequired ? 'warning' : 'info';
       $('.notice').setAttribute('role', manualRequired ? 'alert' : 'status');
