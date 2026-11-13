@@ -1252,7 +1252,11 @@
       stopNavigation();
       const previous=signature(extraction);
       invalidate();
-      store.set({status:'waiting',source:null,results:[],observations:[],plan:[],tdIds:[],linksSearch:null,activeQuery:null,progress:0,total:0,diagnostic:'Waiting for the selected record to load...'});
+      // Navigation owns the form now: discard the previous record's restoration snapshot.
+      if(searchSession)searchSession.closed=true;
+      searchSession=null;
+      extraction=null;
+      store.set({status:'waiting',source:null,results:[],initialCandidates:[],initialCandidateCount:0,sourceRowCount:0,searchGroup:null,diagnosticCode:'',observations:[],plan:[],tdIds:[],linksSearch:null,activeQuery:null,progress:0,total:0,diagnostic:'Waiting for the selected record to load...'});
       const transition={observer:null,pending:null,deadline:null};
       navigation=transition;
       const check=()=>{

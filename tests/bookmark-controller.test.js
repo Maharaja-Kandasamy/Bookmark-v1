@@ -324,10 +324,10 @@ test('record monitoring starts only on Next or Previous Record clicks and stops 
  const dependencies={PickerDuplicateEngine:{normalizeZip:value=>value},PickerGsrsTableAdapter:{extractFromDocument:()=>{reads++;return {profile:'storeView',source};}},PickerManualMatchAdapter:{},PickerRunController:{}};
  const context={globalThis:dependencies,AbortController,setTimeout,clearTimeout};vm.runInNewContext(fs.readFileSync(file,'utf8'),context);
  const controller=dependencies.PickerBookmarkController.create({document:{documentElement:{},addEventListener(){}},window:win,store,lifecycle});
- controller.scan();assert.equal(reads,1);assert.equal(observerCount,0);assert.equal(intervals,0);assert.equal(timers.size,0);
+ controller.scan();store.set({initialCandidates:[{slId:'STALE'}],initialCandidateCount:1,sourceRowCount:9,searchGroup:'all',diagnosticCode:'old-error'});assert.equal(reads,1);assert.equal(observerCount,0);assert.equal(intervals,0);assert.equal(timers.size,0);
  click({target:{closest:()=>null}});assert.equal(observerCount,0);
  const button={closest:()=>({}),getAttribute:()=>null};
- click({target:{closest:()=>button}});assert.equal(observerCount,1);assert.equal(state.source,null);assert.equal(state.results.length,0);
+ click({target:{closest:()=>button}});assert.equal(observerCount,1);assert.equal(state.source,null);assert.equal(state.results.length,0);assert.equal(state.initialCandidates.length,0);assert.equal(state.initialCandidateCount,0);assert.equal(state.sourceRowCount,0);assert.equal(state.searchGroup,null);assert.equal(state.diagnosticCode,'');
  source={slId:'NEW',bannerName:'New'};
  const pending=[...timers.values()].find(timer=>timer.delay===100);pending.fn();
  assert.equal(state.source.slId,'NEW');assert.equal(observer.disconnected,true);assert.equal(timers.size,0);assert.equal(intervals,0);
