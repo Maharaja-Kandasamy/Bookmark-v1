@@ -579,3 +579,18 @@ test('whole numeric-bearing words are removed from banner and street-name search
  assert.equal(engine.addressWildcard('73-4354 B Mamalahoa Hwy'),'73*4354*mamalah*');
  for(const [banner,pattern] of [['7-11','*eleven*'],['BW3','*bw3*'],['76','*76*']])engine.createSearchPlan({bannerName:banner,city:'Austin'}).filter(q=>q.fields.banner).forEach(q=>assert.equal(q.fields.banner,pattern));
 });
+
+
+test('company or ownership markers restrict address searches to the complete door number',()=>{
+ for(const marker of ['Inc','Inc.','Ltd','LLC','L.L.C.','Limited','Corporation','Corp','Company','Holdings','owned by','care of','c/o']){
+  const address='2503D Forest Hills Rd Suite 18 '+marker+' Acme';
+  assert.equal(engine.addressWildcard(address),'2503*',marker);
+  engine.createSearchPlan({address,city:'Austin',state:'TX',zip:'78701'}).filter(q=>q.fields.address).forEach(q=>assert.equal(q.fields.address,'2503*'));
+ }
+ assert.equal(engine.addressWildcard('Acme LLC 1835 Main Ave SW Suite 18'),'1835*');
+ assert.equal(engine.addressWildcard('73-4354 B Mamalahoa Hwy Acme Inc'),'73*4354*');
+ assert.equal(engine.addressWildcard('Acme Inc Suite 18'),'');
+ assert.equal(engine.addressWildcard('2503D Forest Hills Rd'),'2503*fore*hil*');
+ assert.equal(engine.addressWildcard('123 Lincoln Road'),'12*linco*');
+ assert.equal(engine.splitAddress('2503D Forest Hills Rd Suite 18 Acme Inc').unitKey,'18');
+});

@@ -158,7 +158,28 @@
     const tens=new Set('twenty thirty forty fifty sixty seventy eighty ninety'.split(' '));
     return street.filter((word,index)=>!/[0-9]/.test(word) && !streetOrdinalWords.has(word) && !(tens.has(word) && streetOrdinalWords.has(street[index+1])));
   }
+  function companyAddressDoor(value) {
+    const text=cleanText(value).replace(/[\u2010-\u2015\u2212\uFE58\uFE63\uFF0D]/g,'-');
+    const marker=/\b(?:incorporated|inc|limited|ltd|llc|llp|plc|corporation|corp|company|holdings)\b|\b(?:l\s*\.\s*l\s*\.\s*c|l\s*\.\s*t\s*\.\s*d)\b|\b(?:owned\s+by|care\s+of|doing\s+business\s+as)\b|\bc\s*\/\s*o\b/i;
+    if(!marker.test(text))return null;
+    // Preserve existing PO Box, building-only and route-only handling.
+    if(/^(?:p\s*\.?\s*o\s*\.?\s*box|post\s+office\s+box|building|bldg|suite|ste|unit|apt)\b/i.test(text))return null;
+    const parts=addressSearchParts(text);
+    if(parts.numberedRoute && !parts.houseNumber)return null;
+    const doorPattern=/\b(\d+(?:\s*-\s*\d+)?[a-z]?)\s+(?:[a-z]+\s+){0,7}(?:street|st|road|rd|avenue|ave|boulevard|blvd|drive|dr|lane|ln|highway|hwy|court|ct|place|pl|way|terrace|ter)\b/gi;
+    const matches=[...text.matchAll(doorPattern)].filter(match=>!/(?:suite|ste|unit|apt|apartment|building|bldg|floor|fl|room|rm|box)\s*[.#:-]*\s*$/i.test(text.slice(0,match.index)));
+    let door=matches.length===1?matches[0][1]:'';
+    if(!door && /^\d+[a-z]?\s/i.test(text))door=parts.houseNumber;
+    if(!door){
+      const base=splitAddress(text).base;
+      const numbers=base.match(/\b\d+(?:-\d+)?[a-z]?\b/gi) || [];
+      if(numbers.length===1 && !/\b(?:suite|ste|unit|apt|apartment|building|bldg|floor|fl|room|rm|box)\b/i.test(base))door=numbers[0];
+    }
+    return door?door.replace(/[a-z]$/i,'').replace(/\s+/g,'').replace(/[^0-9]+/g,'*')+'*':'';
+  }
   function addressWildcard(value) {
+    const companyDoor=companyAddressDoor(value);
+    if(companyDoor!==null)return companyDoor;
     const composite=hyphenatedDoor(value);
     if(composite){
       const {street}=addressSearchParts('1 '+composite.street);
