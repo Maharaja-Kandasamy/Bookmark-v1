@@ -7,23 +7,26 @@ Published site: [Bookmark-v1](https://maharaja-kandasamy.github.io/Bookmark-v1/)
 - [Picker](https://maharaja-kandasamy.github.io/Bookmark-v1/picker.html) · [How it works](https://maharaja-kandasamy.github.io/Bookmark-v1/picker-how-it-works.html)
 - [GSRS Visuals](https://maharaja-kandasamy.github.io/Bookmark-v1/gsrs-visuals.html) · [How it works](https://maharaja-kandasamy.github.io/Bookmark-v1/gsrs-visuals-how-it-works.html)
 
-## Picker Bookmark v1
+## Picker Recovery Bookmark
 
-Picker Bookmark v1 is an install-free Store and Retail duplicate assistant for the GSRS Manual Match screen. It runs only when its bookmark is clicked and leaves no background process behind.
+This isolated local copy adds a recovery action to Picker. At launch it remembers the visible Batch ID and Match Filter in the current GSRS tab session. If GSRS shows its error screen, use **Recover last GSRS screen** in the bot to return to Input MM Jobs, find the exact batch, open Manual Match, and restore the filter. The recovery waits for the page to settle and stops if either search does not produce exactly one match.
 
 ## Install
 
 1. Open the published GitHub Pages installation page.
 2. Show Chrome's bookmarks bar with **Ctrl + Shift + B**.
-3. Drag **Picker Bookmark v1** from the page to the bookmarks bar.
-4. Open a Store or Retail Manual Match screen and click the saved bookmark.
+3. Import picker-recovery-bookmark.html from Chrome Bookmark Manager, or create a bookmark from its JavaScript URL.
+4. Open the Manual Match screen and launch the bookmark so it can remember the current batch and filter.
 
 If dragging is restricted, use **Copy bookmark link**, create a normal bookmark, and paste the copied value into its URL field.
 
 ## Included
 
 - Store and Retail Manual Match table extraction.
-- Sequential GSRS duplicate searches that wait for stable results.
+- Recovery button that returns to Input MM Jobs and restores the launch-time Batch ID and Match Filter.
+- Sequential GSRS duplicate searches that wait for the result table to settle before advancing.
+- Live per-query captures in the open bot panel, including row counts, candidate summaries, no-match results, and incomplete searches. Comparison and ranking begin only after every planned search completes.
+- Retry Incomplete preserves successful captures and reruns only the missing searches.
 - Direct, exact, high-confidence, and partial duplicate ranking.
 - Candidate-specific **TD Copy** and **Full Copy**.
 - Source-field and full-store copying.

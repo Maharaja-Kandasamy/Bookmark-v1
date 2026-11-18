@@ -468,6 +468,7 @@
     let cancelled = false;
     let resumeResolve = null;
     let currentAborter = null;
+    let currentQuery = null;
     let pauseStarted = 0;
     let pausedMs = 0;
 
@@ -482,20 +483,22 @@
       const elapsed = () => Date.now() - startedAt - pausedMs - (paused ? Date.now() - pauseStarted : 0);
       const observations = [];
       try {
-        publish({ status: 'running', progress: 0, total: plan.length, progressText: `Search 0 of ${plan.length}` });
+        publish({ status: 'running', progress: 0, total: plan.length, observations: [], activeQuery: null, progressText: `Search 0 of ${plan.length}` });
         for (let index = 0; index < plan.length; index += 1) {
           if (cancelled) break;
           await awaitResume();
           if (cancelled || elapsed() >= runTimeoutMs) break;
           const query = plan[index];
-          publish({ status: 'waiting', progress: index + 1, total: plan.length, activeQuery: query, progressText: `Search ${index + 1} of ${plan.length}` });
+          currentQuery = query;
+          publish({ status: 'waiting', progress: index + 1, total: plan.length, observations, activeQuery: query, progressText: `Search ${index + 1} of ${plan.length}` });
           const remainingMs = Math.max(1, runTimeoutMs - elapsed());
           const aborter = new AbortController();
           currentAborter = aborter;
           const result = await timeout(Promise.resolve().then(() => adapter(query, { signal: aborter.signal })).catch(error => ({status:'incomplete',rows:[],diagnostic:'Search could not finish: '+String(error?.message || 'Unexpected failure').split(/[\r\n]/)[0].slice(0,180)})), Math.min(queryTimeoutMs, remainingMs), () => aborter.abort(),aborter.signal);
           currentAborter = null;
           observations.push({ queryId: query.id, query, ...result });
-          publish({ status: 'running', progress: index + 1, total: plan.length, observations, progressText: `Search ${index + 1} of ${plan.length}` });
+          currentQuery = null;
+          publish({ status: 'running', progress: index + 1, total: plan.length, observations, activeQuery: null, completedQuery: query, progressText: `Search ${index + 1} of ${plan.length}` });
           if(options.stopOnIncomplete && result.status !== 'complete') break;
           if (index < plan.length - 1 && !cancelled) await wait(safetyDelayMs);
         }
@@ -504,7 +507,7 @@
         const status = cancelled ? 'cancelled' : incomplete ? 'incomplete' : 'completed';
         const failure = observations.find(item => item.status !== 'complete');
         const diagnostic = cancelled ? 'Search stopped.' : incomplete ? ((failure?.diagnostic || 'Not all checks finished. Retry the incomplete searches.') + (options.stopOnIncomplete && failure ? ' No further searches were submitted. Review the page before retrying.' : '')) : '';
-        const result = { status, observations, progress: observations.length, total: plan.length, diagnostic };
+        const result = { status, observations, activeQuery: null, progress: observations.length, total: plan.length, diagnostic };
         publish(result);
         return result;
       } finally {
@@ -515,7 +518,7 @@
     return {
       start,
       pause() { if (active && !paused) { paused = true; pauseStarted = Date.now(); publish({ status: 'paused' }); } },
-      resume() { if (active && paused) { pausedMs += Date.now() - pauseStarted; paused = false; if (resumeResolve) resumeResolve(); resumeResolve = null; publish({ status: 'running' }); } },
+      resume() { if (active && paused) { pausedMs += Date.now() - pauseStarted; paused = false; if (resumeResolve) resumeResolve(); resumeResolve = null; publish({ status: currentQuery ? 'waiting' : 'running', activeQuery: currentQuery }); } },
       cancel() { cancelled = true; paused = false; currentAborter?.abort(); if (resumeResolve) resumeResolve(); resumeResolve = null; publish({ status: 'cancelled' }); },
       isActive() { return active; }
     };
@@ -914,6 +917,18 @@
   };
   const resultObservationRoot = dialog => byTestId(dialog, 'manual-match-search-table');
   const isResultActivity = (records,resultRoot) => !!resultRoot && (records || []).some(record => resultRoot.contains?.(record.target) || [...(record.addedNodes || []),...(record.removedNodes || [])].some(node => node===resultRoot || node.matches?.('[data-testid="manual-match-search-table"]') || node.querySelector?.('[data-testid="manual-match-search-table"]')));
+  const isVisible = element => {
+    if (!element) return false;
+    const rects = element.getClientRects?.();
+    if (rects && !rects.length) return false;
+    const view = element.ownerDocument?.defaultView;
+    for (let node = element; node?.nodeType === 1; node = node.parentElement) {
+      if (node.hidden || node.getAttribute?.('aria-hidden') === 'true') return false;
+      const style = view?.getComputedStyle?.(node);
+      if (style && (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0)) return false;
+    }
+    return true;
+  };
 
   function extractRows(dialog = findDialog()) {
     const table = byTestId(dialog, 'manual-match-search-table');
@@ -940,10 +955,11 @@
   }
 
   function submitAndWait(dialog,search,options={}) {
-    const timeoutMs=options.timeoutMs || 120000,stableMs=options.stableMs || 1500;
+    const timeoutMs=options.timeoutMs || 120000,stableMs=options.stableMs || 2500;
     if(options.signal?.aborted)return Promise.resolve({status:'incomplete',rows:[],diagnostic:'Search cancelled'});
     return new Promise(resolve => {
       let finished=false,timer,deadline,pending,observer,before,lastSignature,stableSince=0,sawMutation=false,sawBusy=false,dirty=true;
+      const submittedAt=Date.now();
       let observedRoot=resultObservationRoot(dialog);
       const observationOptions={childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['aria-busy']};
       const finish=result=>{
@@ -966,13 +982,17 @@
           }
           if(!nextRoot){stableSince=0;return;}
           const signature=dirty?tableSignature(live):lastSignature;dirty=false;
-          const busy=search.disabled || !!live.querySelector('[aria-busy="true"],.MuiCircularProgress-root,[role="progressbar"]');
+          const busy=search.disabled || live.getAttribute?.('aria-busy')==='true' || nextRoot.getAttribute?.('aria-busy')==='true' ||
+            [...(live.querySelectorAll?.('[aria-busy="true"],.MuiCircularProgress-root,.MuiLinearProgress-root,[role="progressbar"],[data-testid*="loading"],[class*="spinner"],[class*="Spinner"]') || [])].some(isVisible);
           const now=Date.now();
           if(signature!==lastSignature){lastSignature=signature;stableSince=now;}
           if(busy){sawBusy=true;stableSince=0;return;}
           if(!(sawMutation || sawBusy || signature!==before))return;
           if(!stableSince)stableSince=now;
-          if(now-stableSince>=stableMs)finish({status:'complete',rows:extractRows(live),diagnostic:''});
+          if(now-stableSince>=stableMs){
+            const rows=extractRows(live);
+            finish({status:'complete',rows,rowCount:rows.length,completedAt:now,elapsedMs:now-submittedAt,diagnostic:''});
+          }
         } catch(error){finish({status:'incomplete',rows:[],diagnostic:'Search could not finish: '+String(error?.message || 'The page changed').split(/[\r\n]/)[0].slice(0,180)});}
       };
       try {
@@ -987,7 +1007,10 @@
           observer.observe(observedRoot.parentElement || observedRoot,observationOptions);
         }
         timer=setInterval(()=>{if(!observer)dirty=true;check();},150);
-        deadline=setTimeout(()=>finish({status:'incomplete',rows:[],diagnostic:`Result screen did not stabilize within ${Math.round(timeoutMs/1000)} seconds`}),timeoutMs);
+        deadline=setTimeout(()=>{
+          const partialRows=extractRows(findDialog() || dialog);
+          finish({status:'incomplete',rows:partialRows,rowCount:partialRows.length,partial:partialRows.length>0,elapsedMs:Date.now()-submittedAt,diagnostic:`Result screen did not stabilize within ${Math.round(timeoutMs/1000)} seconds`});
+        },timeoutMs);
         options.signal?.addEventListener('abort',onAbort,{once:true});
         search.click();check();
       } catch(error){finish({status:'incomplete',rows:[],diagnostic:'Search could not start: '+String(error?.message || 'The page changed').split(/[\r\n]/)[0].slice(0,180)});}
@@ -1224,7 +1247,7 @@
     let completionAborter = null;
     let paused = false;
     let continueResolve = null;
-    const queryTimeoutMs = 120000, stableMs = 1500, safetyDelayMs = 900;
+    const queryTimeoutMs = 120000, stableMs = 2500, safetyDelayMs = 900;
     const waitBeforeFinalSearch = signal => new Promise(resolve => {
       if(signal.aborted){resolve(false);return;}
       const finish = ready => {clearTimeout(timer);signal.removeEventListener('abort',onAbort);resolve(ready);};
@@ -1324,43 +1347,74 @@
       return found;
     }
 
-    async function runChecks(group = 'all') {
+    async function runChecks(group = 'all', retryIncomplete = false) {
       if(navigation)return {status:'incomplete',observations:[],diagnostic:'Wait for the selected record to load before searching.'};
-      // Existing table rows may belong to a previous search. Start with source data only.
-      scan(readSource(false));
+      let current, plan, previousCaptures=[], pendingPlan;
+      if(retryIncomplete){
+        const existing=store.get() || {};
+        const found=readSource(false);
+        if(found?.error || !existing.source || existing.searchGroup!==group || signature(found)!==signature(extraction)){
+          scan(found);
+          return {status:'incomplete',observations:[],diagnostic:'The source record changed. Its previous captures were cleared; start a fresh search.'};
+        }
+        current=existing;
+        plan=Array.isArray(existing.plan)?existing.plan:Engine.createSearchPlan(existing.source);
+        previousCaptures=(existing.observations||[]).filter(item=>item.status==='complete');
+        const completedIds=new Set(previousCaptures.map(item=>item.queryId));
+        pendingPlan=plan.filter(query=>!completedIds.has(query.id));
+      }else{
+        // Existing table rows may belong to a previous search. Start with source data only.
+        scan(readSource(false));
+        current=store.get();
+      }
       const runRevision = revision;
-      const current = store.get();
       if (!current?.source) return { status: 'error', observations: [], diagnostic: current?.diagnostic || 'Source table not found' };
-      store.set({searchGroup:group});
-      const groups = { banner: ['banner-exact-zip','banner-city','banner-wildcard-zip'], bannerState: ['banner-state'], address: ['address-city','address-state','address-zip','address-door'], phone: ['phone'], store: ['store-banner'] };
-      const plan = Engine.createSearchPlan(current.source).filter(query => group === 'all' || groups[group]?.includes(query.type));
+      if(!retryIncomplete){
+        store.set({searchGroup:group});
+        const groups = { banner: ['banner-exact-zip','banner-city','banner-wildcard-zip'], bannerState: ['banner-state'], address: ['address-city','address-state','address-zip','address-door'], phone: ['phone'], store: ['store-banner'] };
+        plan = Engine.createSearchPlan(current.source).filter(query => group === 'all' || groups[group]?.includes(query.type));
+        pendingPlan=plan;
+      }
       if (!plan.length) {
         const result = { status: 'incomplete', observations: [], progress: 0, total: 0, diagnostic: 'Not enough source data to create searches' };
         store.set(result);
         return result;
       }
+      if(!pendingPlan.length&&retryIncomplete){
+        const result={...current,status:'incomplete',observations:previousCaptures,plan,progress:plan.length,total:plan.length,diagnostic:current.diagnostic||'All planned searches are already complete.'};
+        store.set(result);return result;
+      }
+      store.set({searchGroup:group,plan,observations:previousCaptures,results:[],activeQuery:null,progress:previousCaptures.length,total:plan.length});
+      if(!pendingPlan.length)return {status:'completed',observations:previousCaptures,plan,progress:plan.length,total:plan.length};
       searchSession=Adapter.beginSearchSession?.(current.profile) || null;
       if(searchSession?.ok===false){
-        const result={status:'incomplete',observations:[],results:[],activeQuery:null,diagnostic:searchSession.diagnostic};
+        const result={status:'incomplete',observations:previousCaptures,results:[],plan,searchGroup:group,progress:previousCaptures.length,total:plan.length,activeQuery:null,diagnostic:searchSession.diagnostic};
         store.set(result);return result;
       }
       runner = Runner.createRunController({
-        adapter: (query, runOptions) => Adapter.execute(query, { ...runOptions, session:searchSession, timeoutMs: queryTimeoutMs, stableMs, profile: current.profile, isCurrent:() => { refresh(); return !destroyed && revision === runRevision; } }),
-        onState: state => { if (!destroyed && runRevision === revision) store.set(state.status === 'completed' ? {...state,status:'running'} : state); },
+        adapter: (query, runOptions) => Adapter.execute(query, { ...runOptions, session:searchSession, timeoutMs: queryTimeoutMs-5000, stableMs, profile: current.profile, isCurrent:() => { refresh(); return !destroyed && revision === runRevision; } }),
+        onState: state => {
+          if (!destroyed && runRevision === revision) {
+            const merged={...state,observations:[...previousCaptures,...(state.observations||[])],progress:previousCaptures.length+(state.progress||0),total:plan.length,plan,searchGroup:group};
+            store.set(merged.status === 'completed' ? {...merged,status:'running'} : merged);
+          }
+        },
         queryTimeoutMs,
         runTimeoutMs: plan.length * queryTimeoutMs + Math.max(0,plan.length-1) * safetyDelayMs + 5000,
         safetyDelayMs,
         stopOnIncomplete: true
       });
-      const runResult = await runner.start(plan);
+      let runResult = await runner.start(pendingPlan);
       refresh();
       if (destroyed || runRevision !== revision) return { status: 'cancelled', observations: [], results: [] };
+      runResult={...runResult,observations:[...previousCaptures,...(runResult.observations||[])],progress:previousCaptures.length+(runResult.progress||0),total:plan.length};
       const currentQueryIds = new Set(plan.map(query => query.id));
-      const searched = (runResult.observations || [])
+      const allSearchesComplete=runResult.status==='completed'&&runResult.observations.length===plan.length&&runResult.observations.every(observation=>observation.status==='complete');
+      const searched = (allSearchesComplete ? runResult.observations : [])
         .filter(observation => observation.status === 'complete' && currentQueryIds.has(observation.queryId))
         .flatMap(observation => (observation.rows || []).map(candidate => ({ queryId: observation.queryId, candidate })));
-      const results = Engine.consolidateCandidates(current.source, searched);
-      const tdIds = group === 'all' && Engine.getTopTdIds ? Engine.getTopTdIds(results) : [];
+      const results = allSearchesComplete ? Engine.consolidateCandidates(current.source, searched) : [];
+      const tdIds = allSearchesComplete && group === 'all' && Engine.getTopTdIds ? Engine.getTopTdIds(results) : [];
       let linksSearch = null;
       if (group === 'all' && runResult.status === 'completed' && tdIds.length) {
         const aborter = new AbortController();
@@ -1386,14 +1440,14 @@
       return result;
     }
 
-    async function run(group = 'all') {
+    async function run(group = 'all', retryIncomplete = false) {
       if (destroyed) return {status:'cancelled',observations:[],results:[]};
       if (runBusy) return {status:'busy',diagnostic:'A search is already running. Use Pause or Stop before starting another.'};
       runBusy=true;
       let runRevision=revision;
       let completedResult;
       try {
-        const pending=runChecks(group);
+        const pending=runChecks(group,retryIncomplete);
         runRevision=revision;
         completedResult=await pending;return completedResult;
       } catch (error) {
@@ -1455,7 +1509,277 @@
   root.PickerBookmarkProgress={describeProgress};
 })(typeof globalThis !== 'undefined' ? globalThis : this);
 (function (root) {
-  function mount({ document, window, store, controller, lifecycle, onKilled }) {
+  const STORAGE_KEY = 'picker-bookmark-v1-recovery';
+  const INPUT_JOBS_URL = 'https://gsrs-prod.azure-gsrs-p.nielsencsp.net/#/InputMMJobs';
+  const clean = value => String(value || '').replace(/\s+/g, ' ').trim();
+  const key = value => clean(value).toLowerCase().replace(/[^a-z0-9]/g, '');
+  const visible = element => {
+    if (!element || !element.getClientRects?.().length) return false;
+    const view = element.ownerDocument?.defaultView;
+    for (let node = element; node?.nodeType === 1; node = node.parentElement) {
+      if (node.hidden || node.getAttribute('aria-hidden') === 'true') return false;
+      const style = view?.getComputedStyle?.(node);
+      if (style && (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0)) return false;
+    }
+    return true;
+  };
+  const setValue = (input, value) => {
+    const proto = input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    Object.getOwnPropertyDescriptor(proto, 'value')?.set?.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+  function clickLikeUser(element, win) {
+    if (!element?.isConnected || element.disabled) return false;
+    const rect = element.getBoundingClientRect();
+    const point = { bubbles: true, cancelable: true, view: win, button: 0, buttons: 1,
+      clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 };
+    element.focus?.();
+    try { if (win.PointerEvent) element.dispatchEvent(new win.PointerEvent('pointerdown', { ...point, pointerId: 1, pointerType: 'mouse', isPrimary: true })); } catch {}
+    element.dispatchEvent(new win.MouseEvent('mousedown', point));
+    try { if (win.PointerEvent) element.dispatchEvent(new win.PointerEvent('pointerup', { ...point, buttons: 0, pointerId: 1, pointerType: 'mouse', isPrimary: true })); } catch {}
+    element.dispatchEvent(new win.MouseEvent('mouseup', { ...point, buttons: 0 }));
+    element.dispatchEvent(new win.MouseEvent('click', { ...point, buttons: 0 }));
+    return true;
+  }
+  function invokeReactClick(button, win) {
+    if (!button?.isConnected) return false;
+    const icon = button.querySelector('svg[data-testid^="action-button-"]');
+    const candidates = [button, button.querySelector('.MuiIconButton-label'), icon].filter(Boolean);
+    for (const element of candidates) {
+      const propertyKey = Object.keys(element).find(name => name.startsWith('__reactProps$') || name.startsWith('__reactEventHandlers$'));
+      const handler = propertyKey && element[propertyKey]?.onClick;
+      if (typeof handler !== 'function') continue;
+      const nativeEvent = new win.MouseEvent('click', { bubbles: true, cancelable: true, view: win, button: 0 });
+      const event = {
+        type: 'click', target: icon || button, currentTarget: button, nativeEvent, button: 0, buttons: 0,
+        preventDefault() { nativeEvent.preventDefault(); },
+        stopPropagation() { nativeEvent.stopPropagation(); },
+        persist() {},
+      };
+      try { handler(event); return true; } catch {}
+    }
+    return false;
+  }
+  function capture(doc, win) {
+    const manual = [...doc.querySelectorAll('[data-testid="manual-match"]')].find(visible);
+    const filter = (manual && [...manual.querySelectorAll('#matchFilter')].find(visible)) || [...doc.querySelectorAll('#matchFilter')].find(visible);
+    const scope = doc.querySelector('.modal-content-cls') || doc.body;
+    const text = clean(scope?.innerText || scope?.textContent);
+    const batchId = clean(text.match(/Batch\s*Id\s*:\s*([\w-]+)/i)?.[1] || doc.querySelector('#batchId')?.value);
+    const filterName = clean(filter?.value);
+    return { batchId, filterName, noFilter: !filterName, filterCaptured: !!filter, capturedAt: Date.now(), sourceUrl: win.location.href };
+  }
+  function create({ document: doc, window: win }) {
+    const current = capture(doc, win);
+    let previous = {};
+    try { previous = JSON.parse(win.sessionStorage.getItem(STORAGE_KEY) || '{}'); } catch {}
+    const context = {
+      ...current,
+      batchId: current.batchId || previous.batchId || '',
+      filterName: current.filterCaptured ? current.filterName : (previous.filterName || ''),
+      noFilter: current.filterCaptured ? !current.filterName : (previous.noFilter ?? true),
+      filterCaptured: current.filterCaptured || !!previous.filterCaptured,
+    };
+    try { win.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(context)); } catch {}
+    let timer = 0, stopped = false, stage = 'start', startedAt = 0, stableAt = 0, lastSignature = '', actionButton = null, actionAttempts = 0, reactClickTried = false, menuItemsBefore = new WeakSet(), overlaysBefore = new WeakSet(), filterBeforeSignature = '', filterSearchClicked = false;
+    const elapsed = () => Date.now() - startedAt;
+    const announce = (message, error = false) => { try { onStatus?.(message, error); } catch {} };
+    let onStatus = null;
+    function fail(message) { stopped = true; clearInterval(timer); announce(message, true); return false; }
+    function done(message) { stopped = true; clearInterval(timer); announce(message, false); return true; }
+    function routeToJobs() {
+      if (!win.location.href.startsWith(INPUT_JOBS_URL.split('#')[0])) return fail('Recovery stopped: this bookmark only works on the GSRS production site.');
+      const target = new URL(INPUT_JOBS_URL);
+      if (win.location.hash !== target.hash) { stage = 'jobs'; win.location.hash = target.hash; startedAt = Date.now(); announce('Opening Input MM Jobs…'); return; }
+      stage = 'batch-search'; startedAt = Date.now();
+    }
+    function findTableByHeaders(required, scope = doc) {
+      return [...scope.querySelectorAll('table')].map(table => {
+        const headers = [...table.querySelectorAll('thead th')].map(cell => key(cell.getAttribute('title') || cell.textContent));
+        return { table, headers };
+      }).find(item => required.every(header => item.headers.some(value => value === key(header) || value.includes(key(header)))));
+    }
+    function findFilterDialog() {
+      const title = [...doc.querySelectorAll('[data-testid="modal-title"]')].find(el => visible(el) && /match\s*filter/i.test(clean(el.innerText)));
+      return title?.closest('.modal-content-cls') || title?.closest('[role="dialog"]') || null;
+    }
+    function filterTableSignature(table) {
+      return table ? [...table.querySelectorAll('tbody tr')].map(row => clean(row.innerText)).join('|') : 'missing';
+    }
+    function snapshotActionPopup() {
+      menuItemsBefore = new WeakSet([...doc.querySelectorAll('body *')].filter(el => visible(el) && key(el.innerText) === 'manualmatch'));
+      overlaysBefore = new WeakSet([...doc.querySelectorAll('.MuiPopover-root, .MuiMenu-paper, .MuiPaper-root, [role="menu"]')].filter(visible));
+    }
+    function findNewManualMatchItem() {
+      const exact = [...doc.querySelectorAll('body *')].filter(el => visible(el) && key(el.innerText) === 'manualmatch' && !menuItemsBefore.has(el));
+      for (const element of exact) {
+        const clickable = element.closest('.MuiMenuItem-root, [role="menuitem"], li, button, [role="button"], [tabindex="0"]') || element;
+        if (visible(clickable) && key(clickable.innerText) === 'manualmatch') return clickable;
+      }
+      return null;
+    }
+    function findManualMatchInPopup() {
+      const roots = [...doc.querySelectorAll('.MuiPopover-root, .MuiMenu-paper, .MuiPaper-root, .MuiPopper-root, [role="menu"], [role="listbox"]')].filter(visible);
+      for (const root of roots) {
+        const exact = [...root.querySelectorAll('*')].filter(el => visible(el) && key(el.innerText) === 'manualmatch');
+        for (const element of exact) {
+          const clickable = element.closest('.MuiMenuItem-root, [role="menuitem"], li, button, [role="button"], [tabindex="0"]') || element;
+          if (root.contains(clickable) && visible(clickable) && key(clickable.innerText) === 'manualmatch') return clickable;
+        }
+      }
+      return null;
+    }
+    function actionPopupOpen() {
+      return [...doc.querySelectorAll('.MuiPopover-root, .MuiMenu-paper, .MuiPaper-root, [role="menu"]')]
+        .some(el => visible(el) && !overlaysBefore.has(el));
+    }
+    function tick() {
+      if (stopped) return;
+      try {
+        if (stage === 'start') {
+          if (!context.batchId) return fail('Recovery could not find a Batch ID from when Picker launched. Reopen Picker on the Manual Match screen and try again.');
+          if (!context.filterCaptured) return fail('Recovery could not read the Match Filter setting from when Picker launched. Reopen Picker on the Manual Match screen and try again.');
+          routeToJobs(); return;
+        }
+        if (elapsed() > 120000) return fail('GSRS took too long to respond. Wait for the page to finish, then start recovery again.');
+        if (stage === 'jobs') {
+          if (win.location.hash !== '#/InputMMJobs') return;
+          stage = 'batch-search'; startedAt = Date.now();
+        }
+        if (stage === 'batch-search') {
+          const input = doc.querySelector('input#batchId, input[data-testid="batchid"]');
+          if (!input || !visible(input)) return;
+          const search = doc.querySelector('[data-testid="search-button"]');
+          if (!search) return;
+          if (input.value !== context.batchId) setValue(input, context.batchId);
+          search.click();
+          stage = 'batch-results'; startedAt = Date.now(); stableAt = 0; lastSignature = '';
+          announce(`Searching for Batch ID ${context.batchId}…`); return;
+        }
+        if (stage === 'batch-results') {
+          const tableRoot = doc.querySelector('[data-testid="inputjobs-densetable"]') || doc;
+          const found = findTableByHeaders(['Batch ID'], tableRoot);
+          if (!found) return;
+          if (found.table.querySelector('[aria-busy="true"], [role="progressbar"], .MuiCircularProgress-root') || elapsed() < 1800) return;
+          const batchIndex = found.headers.findIndex(value => value.includes('batchid'));
+          const rows = [...found.table.querySelectorAll('tbody tr')].filter(row => clean(row.children[batchIndex]?.innerText) === context.batchId);
+          const signature = `${rows.length}:${rows.map(row => clean(row.innerText)).join('|')}`;
+          if (signature !== lastSignature) { lastSignature = signature; stableAt = Date.now(); return; }
+          if (!stableAt || Date.now() - stableAt < 1200) return;
+          if (rows.length !== 1) return fail(`Recovery found ${rows.length} rows for Batch ID ${context.batchId}. It needs exactly one matching batch.`);
+          const row = rows[0];
+          const actionIcon = row.querySelector('svg[data-testid^="action-button-"]');
+          actionButton = actionIcon?.closest('button[type="button"]') || actionIcon?.parentElement?.closest('button') || row.querySelector('button[aria-label*="Action"], button[title*="Action"]');
+          if (!actionButton) return fail('The matching batch row has no Action menu.');
+          actionAttempts = 1;
+          reactClickTried = false;
+          snapshotActionPopup();
+          actionButton.scrollIntoView?.({ block: 'center', inline: 'center' });
+          clickLikeUser(actionButton, win); stage = 'batch-menu'; startedAt = Date.now(); announce('Found the batch row button. Clicking its three dots…'); return;
+        }
+        if (stage === 'batch-menu') {
+          const menuItem = findManualMatchInPopup() || findNewManualMatchItem();
+          if (!menuItem) {
+            const popupOpen = actionPopupOpen();
+            if (!popupOpen && Date.now() - startedAt > 1800 && actionAttempts < 3 && actionButton?.isConnected) {
+              actionAttempts++;
+              if (!reactClickTried) {
+                reactClickTried = true;
+                if (invokeReactClick(actionButton, win)) { startedAt = Date.now(); announce('Asking the GSRS row button to open its Action menu…'); return; }
+              }
+              snapshotActionPopup();
+              clickLikeUser(actionButton, win); startedAt = Date.now(); announce(`The three-dot button did not open its menu; retrying (${actionAttempts}/3)…`);
+            } else if (popupOpen && Date.now() - startedAt > 6000) return fail('The Action popup opened, but its Manual Match option could not be identified.');
+            else if (!popupOpen && Date.now() - startedAt > 6000) return fail('The batch is found, but GSRS is not opening the row Action menu. The bookmark cannot continue until that menu opens.');
+            return;
+          }
+          clickLikeUser(menuItem, win); stage = 'manual-screen'; startedAt = Date.now(); announce('Selecting Manual Match from the open Action popup…'); return;
+        }
+        if (stage === 'manual-screen') {
+          const manual = [...doc.querySelectorAll('[data-testid="manual-match"]')].find(visible);
+          if (!manual) return;
+          const filter = [...manual.querySelectorAll('#matchFilter')].find(visible);
+          if (!filter) return;
+          if (context.noFilter) {
+            if (clean(filter.value)) return fail('The Manual Match screen has a selected filter, but Picker launched with no filter selected.');
+            return done(`Recovered Batch ID ${context.batchId}. Manual Match is open with no filter selected.`);
+          }
+          if (clean(filter.value) === context.filterName) return done(`Recovered Batch ID ${context.batchId} and restored filter ${context.filterName}.`);
+          filter.click(); stage = 'filter-dialog'; startedAt = Date.now(); announce(`Finding Match Filter ${context.filterName}…`); return;
+        }
+        if (stage === 'filter-dialog') {
+          const modal = findFilterDialog();
+          if (!modal) return;
+          const labels = [...modal.querySelectorAll('label')];
+          const nameLabel = labels.find(label => clean(label.textContent).toLowerCase() === 'filter name');
+          const nameInput = nameLabel?.parentElement?.querySelector('input') || nameLabel?.closest('.MuiFormControl-root')?.querySelector('input');
+          const search = [...modal.querySelectorAll('button')].find(button => clean(button.getAttribute('title')).toLowerCase() === 'search');
+          if (!nameInput || !search) return;
+          const table = findTableByHeaders(['Filter ID', 'Filter Name'], modal)?.table;
+          filterBeforeSignature = filterTableSignature(table);
+          filterSearchClicked = false;
+          setValue(nameInput, context.filterName);
+          if (clean(nameInput.value) !== context.filterName) return fail('GSRS did not accept the saved filter name in the Filter Name search field.');
+          ['keydown', 'keypress', 'keyup'].forEach(type => nameInput.dispatchEvent(new win.KeyboardEvent(type, { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true })));
+          stage = 'filter-results'; startedAt = Date.now(); stableAt = 0; lastSignature = filterBeforeSignature; announce(`Searching filters for “${context.filterName}”…`); return;
+        }
+        if (stage === 'filter-results') {
+          const modal = findFilterDialog();
+          if (!modal) return;
+          const table = modal && findTableByHeaders(['Filter ID', 'Filter Name'], modal)?.table;
+          if (!table) return;
+          const currentSignature = filterTableSignature(table);
+          if (!filterSearchClicked && currentSignature === filterBeforeSignature && elapsed() > 1000) {
+            const search = [...modal.querySelectorAll('button')].find(button => clean(button.getAttribute('title')).toLowerCase() === 'search');
+            if (search) {
+              filterSearchClicked = true; search.click(); startedAt = Date.now(); stableAt = 0; lastSignature = currentSignature;
+              announce('Submitting the filter name search…'); return;
+            }
+          }
+          if (table.querySelector('[aria-busy="true"], [role="progressbar"], .MuiCircularProgress-root') || elapsed() < 1800) return;
+          const headers = [...table.querySelectorAll('thead th')].map(cell => key(cell.getAttribute('title') || cell.textContent));
+          const nameIndex = headers.findIndex(value => value.includes('filtername'));
+          const rows = [...table.querySelectorAll('tbody tr')].filter(row => clean(row.children[nameIndex]?.innerText) === context.filterName);
+          const signature = `${rows.length}:${currentSignature}`;
+          if (signature !== lastSignature) { lastSignature = signature; stableAt = Date.now(); return; }
+          if (!stableAt || Date.now() - stableAt < 1200) return;
+          if (rows.length !== 1) return fail(`Filter search returned ${rows.length} exact matches for “${context.filterName}”. It needs exactly one.`);
+          const selection = rows[0].querySelector('input[type="radio"],input[type="checkbox"]');
+          announce(`Found the filter “${context.filterName}”. Selecting it…`);
+          if (selection) clickLikeUser(selection, win); else clickLikeUser(rows[0], win);
+          stage = 'filter-accept'; startedAt = Date.now(); return;
+        }
+        if (stage === 'filter-accept') {
+          const modal = findFilterDialog();
+          if (!modal) { stage = 'filter-applied'; startedAt = Date.now(); return; }
+          const ok = modal.querySelector('[data-testid="ok-button"]');
+          if (ok && !ok.disabled) {
+            clickLikeUser(ok, win); stage = 'filter-applied'; startedAt = Date.now(); announce('Confirming the selected filter…'); return;
+          }
+          if (elapsed() > 15000) return fail('The filter row was found, but GSRS did not enable OK after selection.');
+          return;
+        }
+        if (stage === 'filter-applied') {
+          const filter = [...(doc.querySelector('[data-testid="manual-match"]')?.querySelectorAll('#matchFilter') || [])].find(visible);
+          if (filter && clean(filter.value) === context.filterName) return done(`Recovered Batch ID ${context.batchId} and restored filter ${context.filterName}.`);
+        }
+      } catch (error) { fail(`Recovery stopped safely: ${clean(error?.message) || 'GSRS changed during recovery'}`); }
+    }
+    function recover(statusCallback) {
+      if (stopped) { stage = 'start'; stopped = false; }
+      onStatus = statusCallback;
+      startedAt = Date.now();
+      timer = win.setInterval(tick, 400);
+      tick();
+      return { cancel() { stopped = true; win.clearInterval(timer); } };
+    }
+    return { context, recover };
+  }
+  root.PickerBookmarkRecovery = { create, capture };
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+(function (root) {
+  function mount({ document, window, store, controller, lifecycle, recovery, onKilled }) {
     const Engine = root.PickerDuplicateEngine;
     const Layout = root.PickerBotLayout;
     const host = document.createElement('div');
@@ -1470,6 +1794,7 @@
         .notice[data-tone=warning]{background:#fffbeb;border-color:#fde68a;color:#92400e;font-weight:600}
         .quick-searches{position:absolute;bottom:calc(100% + 4px);left:calc(50% + var(--toolbar-offset,0px));transform:translateX(-50%);display:flex;gap:3px;padding:3px;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 2px 8px #0f172a18}.quick-search{width:25px;height:25px;padding:0;border:1px solid #cbd5e1;border-radius:5px;background:#fff;color:#1e40af;font:600 10px Segoe UI,sans-serif;cursor:pointer}.quick-search:hover{background:#eff6ff}.quick-search:disabled{opacity:.4;cursor:not-allowed}.quick-search:focus-visible{outline:2px solid #2563eb;outline-offset:2px}
         .bot-status{position:absolute;right:calc(100% + 10px);bottom:42px;display:flex;align-items:center;gap:8px;width:max-content;max-width:min(290px,calc(100vw - 164px));flex-wrap:wrap;padding:7px 9px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;color:#334155;box-shadow:0 2px 8px #0f172a18;font:500 11px Segoe UI,sans-serif}.bot-status[hidden]{display:none}.status-right .bot-status{right:auto;left:calc(100% + 10px)}.bot-progress{max-width:160px;overflow-wrap:anywhere}.quick-pause{border:1px solid #bfdbfe;background:#eff6ff;color:#1e40af;border-radius:5px;padding:4px 7px;font-size:10px;cursor:pointer}.quick-pause[hidden]{display:none}.quick-stop{border:1px solid #fecaca;background:#fef2f2;color:#991b1b;border-radius:5px;padding:4px 7px;font-size:10px;cursor:pointer}.quick-stop[hidden]{display:none}.conflicts{color:#92400e!important}.source-inference{font-size:10px;color:#64748b}
+        .capture-note{font-size:9px;line-height:1.4;color:var(--muted);margin:-2px 0 7px}.captures{display:grid;gap:7px;max-height:210px;overflow:auto;overscroll-behavior:contain}.capture{border:1px solid var(--border);border-left:3px solid #94a3b8;border-radius:7px;padding:8px;background:#fff}.capture[data-status=searching]{border-left-color:var(--accent);background:#f8fbff}.capture[data-status=complete]{border-left-color:var(--success)}.capture[data-status=incomplete]{border-left-color:var(--error)}.capture-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;font-size:10px}.capture-head strong{min-width:0;overflow-wrap:anywhere}.capture-state{flex:none;color:var(--muted);font-size:9px}.capture[data-status=searching] .capture-state{color:var(--accent);font-weight:650}.capture-meta{font-size:9px;color:var(--muted);margin-top:3px}.capture-row{padding:5px 0 0;margin-top:5px;border-top:1px solid #edf0f4;font-size:9px;line-height:1.4}.capture-row strong{display:block;color:#334155}.capture-row span{display:block;color:var(--muted);overflow-wrap:anywhere}.capture-diagnostic{font-size:9px;color:var(--error);margin-top:4px;overflow-wrap:anywhere}
         ${root.PickerBookmarkRobot.css}
       </style>
       <div class="shell" data-state="ready">
@@ -1480,7 +1805,7 @@
         </button>
         <section class="panel" aria-label="Picker Bookmark v1">
           <div class="head"><img class="logo" src="data:image/png;base64,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" alt="Picker logo"><div><div class="title">Picker Bookmark v1</div><div class="sub">Store and Retail duplicate checks</div></div><button class="btn close" data-icon="close" aria-label="Close panel"></button></div>
-          <div class="scroll"><div class="source"><strong class="source-name">Reading source</strong><div class="meta source-meta"></div></div><div class="fields"></div><div class="notice" role="status">Ready.</div><div class="label">Duplicate checks</div><div class="progress"><div class="fill"></div></div><div class="meta progress-text"></div><div class="grid controls"><button class="btn primary run" data-icon="play">Run All Checks</button><button class="btn" data-search="banner">Banner</button><button class="btn" data-search="bannerState">Banner + State</button><button class="btn" data-search="address">Address</button><button class="btn" data-search="phone">Phone</button><button class="btn" data-search="store">Store</button><button class="btn retry" data-icon="refresh">Retry Incomplete</button><button class="btn pause" data-icon="pause">Pause</button><button class="btn cancel" data-icon="square">Cancel</button></div><div class="label">Store tools</div><div class="grid"><button class="btn google-search" data-icon="search">Google Search</button><button class="btn google-banner-state" data-icon="search">Google Banner + State</button><button class="btn google-banner-city" data-icon="search">Google Banner + City</button><button class="btn address-search" data-icon="search">Google Address Search</button><button class="btn map-search" data-icon="map">Map Address Search</button><button class="btn copy-store" data-icon="copy">Copy Store Data</button></div><div class="label">Results</div><div class="results"></div></div>
+          <div class="scroll"><div class="source"><strong class="source-name">Reading source</strong><div class="meta source-meta"></div></div><div class="fields"></div><div class="notice" role="status">Ready.</div><div class="label">Duplicate checks</div><div class="progress"><div class="fill"></div></div><div class="meta progress-text"></div><div class="grid controls"><button class="btn primary run" data-icon="play">Run All Checks</button><button class="btn" data-search="banner">Banner</button><button class="btn" data-search="bannerState">Banner + State</button><button class="btn" data-search="address">Address</button><button class="btn" data-search="phone">Phone</button><button class="btn" data-search="store">Store</button><button class="btn retry" data-icon="refresh">Retry Incomplete</button><button class="btn pause" data-icon="pause">Pause</button><button class="btn cancel" data-icon="square">Cancel</button><button class="btn recover">Recover last GSRS screen</button></div><div class="label">Store tools</div><div class="grid"><button class="btn google-search" data-icon="search">Google Search</button><button class="btn google-banner-state" data-icon="search">Google Banner + State</button><button class="btn google-banner-city" data-icon="search">Google Banner + City</button><button class="btn address-search" data-icon="search">Google Address Search</button><button class="btn map-search" data-icon="map">Map Address Search</button><button class="btn copy-store" data-icon="copy">Copy Store Data</button></div><div class="label">Live search captures</div><div class="capture-note">Each query appears here after its results are captured. Final comparison and ranking follow when all searches finish.</div><div class="captures" role="log" aria-live="polite"></div><div class="label">Ranked results</div><div class="results"></div></div>
           <div class="actions"><button class="btn danger kill" data-icon="power">Kill Bot</button></div>
         </section>
       </div>`;
@@ -1504,7 +1829,7 @@
     const shell = $('.shell');
     const panel = $('.panel');
     const EMPTY_SOURCE = {}, EMPTY_RESULTS = [];
-    let renderedSourceKey,renderedResults,renderedEmptyStatus,availablePlan=[],renderFrame=null,pendingState,positioned=false,anchorKey='';
+    let renderedSourceKey,renderedResults,renderedEmptyStatus,renderedCaptureKey='',availablePlan=[],renderFrame=null,pendingState,positioned=false,anchorKey='';
     let open = false;
     let state = store.get() || {};
     let drag = null;
@@ -1514,6 +1839,7 @@
     let killing = false;
     let killed = false;
     let killTimer = null;
+    let recoveryTask = null;
     const robot = $('#astrobot-svg');
     const motionStates = ['idle','blinking','waving','thinking','celebrating','dragging','landing','killing'];
     const restingMotion = () => ['running','waiting'].includes(state.status) ? 'thinking' : ['paused','error','incomplete'].includes(state.status) ? 'blinking' : 'idle';
@@ -1598,12 +1924,62 @@
       const manualRequired = !state.source && !!state.diagnostic;
       $('.notice').dataset.tone = manualRequired ? 'warning' : 'info';
       $('.notice').setAttribute('role', manualRequired ? 'alert' : 'status');
+      const observations = Array.isArray(state.observations) ? state.observations : [];
+      const liveQuery = ['waiting','paused'].includes(state.status) ? state.activeQuery : null;
+      const captureKey = JSON.stringify([state.status,liveQuery?.id,observations.map(item=>[item.queryId,item.status,item.rows||[],item.diagnostic])]);
+      if(captureKey!==renderedCaptureKey){
+        renderedCaptureKey=captureKey;
+        const captures=$('.captures');captures.textContent='';
+        const addCapture=(label,statusText,status,rows=[],diagnostic='')=>{
+          const card=document.createElement('article');card.className='capture';card.dataset.status=status;
+          const head=document.createElement('div');head.className='capture-head';
+          const title=document.createElement('strong');title.textContent=label;
+          const stateText=document.createElement('span');stateText.className='capture-state';stateText.textContent=statusText;
+          head.append(title,stateText);card.appendChild(head);
+          if(status!=='searching'){
+            const meta=document.createElement('div');meta.className='capture-meta';
+            meta.textContent=status==='complete'?(rows.length?rows.length+' candidate row'+(rows.length===1?'':'s')+' captured':'Search complete · no matches')
+              :(rows.length?'Partial capture · '+rows.length+' row'+(rows.length===1?'':'s')+' before this search stopped':'No result rows captured');
+            card.appendChild(meta);
+          }
+          rows.forEach((row,index)=>{
+            const item=document.createElement('div');item.className='capture-row';
+            const name=document.createElement('strong');name.textContent=row.bannerName||row.storeName||('SL_ID '+(row.slId||'Unknown candidate'));
+            const detail=document.createElement('span');
+            detail.textContent=[row.slId&&('SL_ID '+row.slId),row.storeNumber&&('Store #'+row.storeNumber),[row.address,row.city,row.state,row.zip].filter(Boolean).join(', '),row.phone].filter(Boolean).join(' · ')||('Candidate '+(index+1));
+            item.append(name,detail);card.appendChild(item);
+          });
+          if(diagnostic){const detail=document.createElement('div');detail.className='capture-diagnostic';detail.textContent=diagnostic;card.appendChild(detail);}
+          captures.appendChild(card);
+        };
+        if(liveQuery)addCapture(liveQuery.label||liveQuery.id||'Current search',state.status==='paused'?'Paused · current search may finish':'Searching · waiting for GSRS results','searching');
+        observations.forEach((item,index)=>{
+          const rows=Array.isArray(item.rows)?item.rows:[];
+          const complete=item.status==='complete';
+          addCapture(item.query?.label||item.query?.id||('Search '+(index+1)),complete?'Captured':item.status==='cancelled'?'Stopped':'Incomplete',complete?'complete':'incomplete',rows,item.diagnostic||'');
+        });
+        if(!liveQuery&&!observations.length){
+          const empty=document.createElement('div');empty.className='empty';empty.textContent='Captured rows for each search will appear here.';captures.appendChild(empty);
+        }
+        if(liveQuery||observations.length){
+          const scrollArea=$('.scroll');
+          scrollArea.scrollTop+=captures.getBoundingClientRect().top-scrollArea.getBoundingClientRect().top;
+          captures.scrollTop=captures.scrollHeight;
+        }
+      }
+      if(state.status==='completed'&&observations.length){
+        $('.capture-note').textContent='All planned searches were captured. Comparison and ranking are complete below.';
+      }else if(['running','waiting','paused'].includes(state.status)){
+        $('.capture-note').textContent='The next search waits until the current result table settles. Captures stay unranked until the search plan finishes.';
+      }else{
+        $('.capture-note').textContent='Each query appears here after its results are captured. Final comparison and ranking follow when all searches finish.';
+      }
       const nextResults=state.results || EMPTY_RESULTS;
       if(sourceChanged || renderedResults!==nextResults || (!nextResults.length && renderedEmptyStatus!==state.status)){
       renderedResults=nextResults;renderedEmptyStatus=state.status;
       const results=$('.results'); results.textContent='';
       (state.results||[]).forEach((item,index)=>{ const candidate=item.candidate||item; const card=document.createElement('article'); card.className=`result ${item.directMatch?'direct':String(item.classification||'').startsWith('Exact')?'exact':''}`; card.innerHTML=`<div class="result-heading"><h4></h4><span class="record-status"></span></div><p class="kind"></p><p class="where"></p><p class="why"></p><p class="conflicts"></p><div class="result-actions"><button class="btn" data-icon="copy" data-result="td" data-index="${index}">TD Copy</button><button class="btn" data-icon="copy" data-result="full" data-index="${index}">Full Copy</button></div>`; const rawStatus=Engine.cleanText(candidate.storeStatus || candidate.copyFields?.find(field => /^(?:STORE_STATUS|SL_STORE_STATUS|RS_STORE_STATUS|STATUS)$/i.test(field.header))?.value); const pill=card.querySelector('.record-status'); const statusKey=rawStatus.toLowerCase().replace(/[^a-z]/g,''); const knownStatus={open:'Open',closed:'Closed',unverified:'Unverified',unverifyed:'Unverified',duplicate:'Duplicate'}; pill.textContent=knownStatus[statusKey] || rawStatus || 'Status unavailable'; pill.dataset.status=statusKey==='unverifyed'?'unverified':statusKey; pill.title=rawStatus ? `Record status: ${rawStatus}` : 'Record status was not provided'; card.querySelector('h4').textContent=candidate.bannerName||`SL_ID ${candidate.slId||'Unknown'}`; card.querySelector('.kind').textContent=item.classification||'Potential duplicate'; card.querySelector('.where').textContent=[candidate.address,candidate.city,candidate.state,candidate.zip].filter(Boolean).join(', '); const explanation=Engine.explainCandidate(state.source,item); card.querySelector('.why').textContent=explanation.summary; card.querySelector('.conflicts').textContent=explanation.conflicts.join('; '); decorateIcons(card); results.appendChild(card); });
-      if (!(state.results||[]).length) { const empty=document.createElement('div');empty.className='empty';empty.textContent=state.status==='completed'?'No duplicates found.':'Run checks to see duplicate results.';results.appendChild(empty); }
+      if (!(state.results||[]).length) { const empty=document.createElement('div');empty.className='empty';empty.textContent=state.status==='completed'?'No duplicates found.':['running','waiting','paused'].includes(state.status)?'Comparisons and ranking appear after all planned searches finish.':state.status==='incomplete'&&observations.length?'Some searches are incomplete. Retry them to finish capture before comparison and ranking.':'Run checks to see duplicate results.';results.appendChild(empty); }
       }
       if(open || !positioned){position();positioned=true;}
     }
@@ -1626,6 +2002,7 @@
     function finishKill() {
       if (killed) return;
       killed = true;
+      recoveryTask?.cancel?.();
       window.clearTimeout(killTimer);
       host.remove();
       onKilled();
@@ -1654,10 +2031,15 @@
       if(target.classList.contains('bot')) { if(suppressClick){suppressClick=false;return;} animateRobot('waving',1200); return open?closePanel():openPanel(); }
       if(target.classList.contains('close')) return closePanel();
       if(target.classList.contains('quick-stop')) { controller.cancel(); return; }
-      if(target.dataset.search || target.classList.contains('run') || target.classList.contains('retry')) { closePanel(); return controller.run(target.dataset.search || (target.classList.contains('retry') ? store.get()?.searchGroup || 'all' : 'all')).catch(error=>{ $('.notice').textContent=error.message; $('.bot').title=error.message; }); }
+      if(target.dataset.search || target.classList.contains('run') || target.classList.contains('retry')) { if(!open)openPanel(); return controller.run(target.dataset.search || (target.classList.contains('retry') ? store.get()?.searchGroup || 'all' : 'all'),target.classList.contains('retry')).catch(error=>{ $('.notice').textContent=error.message; $('.bot').title=error.message; }); }
       if(target.classList.contains('pause') || target.classList.contains('quick-pause')) return store.get()?.status==='paused'?controller.resume():controller.pause();
       if(target.classList.contains('cancel')) return controller.cancel();
       if(target.classList.contains('kill')) return kill();
+      if(target.classList.contains('recover')) {
+        recoveryTask?.cancel?.();
+        recoveryTask = recovery?.recover((message, error) => { $('.notice').textContent = message; $('.notice').dataset.error = error ? 'true' : 'false'; });
+        return;
+      }
       if(target.dataset.copy) return copy(state.source?.[target.dataset.copy]);
       if(target.classList.contains('google-banner-state') || target.classList.contains('google-banner-city')) {
         const source=state.source||{};
@@ -1731,10 +2113,11 @@
       }});
       store = root.PickerBookmarkStore.create({ status:'ready',results:[],observations:[] },{onError:lifecycle.reportError});
       controller = root.PickerBookmarkController.create({ document, window, store, lifecycle });
+      const recovery = root.PickerBookmarkRecovery.create({ document, window });
       controller.scan();
       let bot;
       instance = { open(){ controller.refresh(); bot.open(); }, kill(options){ bot.destroy(options); } };
-      bot = root.PickerBookmarkBot.mount({ document, window, store, controller, lifecycle, onKilled(){ if (window.__pickerBookmarkV1 === instance) delete window.__pickerBookmarkV1; } });
+      bot = root.PickerBookmarkBot.mount({ document, window, store, controller, lifecycle, recovery, onKilled(){ if (window.__pickerBookmarkV1 === instance) delete window.__pickerBookmarkV1; } });
       window.__pickerBookmarkV1 = instance;
       bot.open();
       return instance;

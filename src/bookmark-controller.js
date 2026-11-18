@@ -17,7 +17,7 @@
     let completionAborter = null;
     let paused = false;
     let continueResolve = null;
-    const queryTimeoutMs = 120000, stableMs = 1500, safetyDelayMs = 900;
+    const queryTimeoutMs = 120000, stableMs = 2500, safetyDelayMs = 900;
     const waitBeforeFinalSearch = signal => new Promise(resolve => {
       if(signal.aborted){resolve(false);return;}
       const finish = ready => {clearTimeout(timer);signal.removeEventListener('abort',onAbort);resolve(ready);};
@@ -117,43 +117,74 @@
       return found;
     }
 
-    async function runChecks(group = 'all') {
+    async function runChecks(group = 'all', retryIncomplete = false) {
       if(navigation)return {status:'incomplete',observations:[],diagnostic:'Wait for the selected record to load before searching.'};
-      // Existing table rows may belong to a previous search. Start with source data only.
-      scan(readSource(false));
+      let current, plan, previousCaptures=[], pendingPlan;
+      if(retryIncomplete){
+        const existing=store.get() || {};
+        const found=readSource(false);
+        if(found?.error || !existing.source || existing.searchGroup!==group || signature(found)!==signature(extraction)){
+          scan(found);
+          return {status:'incomplete',observations:[],diagnostic:'The source record changed. Its previous captures were cleared; start a fresh search.'};
+        }
+        current=existing;
+        plan=Array.isArray(existing.plan)?existing.plan:Engine.createSearchPlan(existing.source);
+        previousCaptures=(existing.observations||[]).filter(item=>item.status==='complete');
+        const completedIds=new Set(previousCaptures.map(item=>item.queryId));
+        pendingPlan=plan.filter(query=>!completedIds.has(query.id));
+      }else{
+        // Existing table rows may belong to a previous search. Start with source data only.
+        scan(readSource(false));
+        current=store.get();
+      }
       const runRevision = revision;
-      const current = store.get();
       if (!current?.source) return { status: 'error', observations: [], diagnostic: current?.diagnostic || 'Source table not found' };
-      store.set({searchGroup:group});
-      const groups = { banner: ['banner-exact-zip','banner-city','banner-wildcard-zip'], bannerState: ['banner-state'], address: ['address-city','address-state','address-zip','address-door'], phone: ['phone'], store: ['store-banner'] };
-      const plan = Engine.createSearchPlan(current.source).filter(query => group === 'all' || groups[group]?.includes(query.type));
+      if(!retryIncomplete){
+        store.set({searchGroup:group});
+        const groups = { banner: ['banner-exact-zip','banner-city','banner-wildcard-zip'], bannerState: ['banner-state'], address: ['address-city','address-state','address-zip','address-door'], phone: ['phone'], store: ['store-banner'] };
+        plan = Engine.createSearchPlan(current.source).filter(query => group === 'all' || groups[group]?.includes(query.type));
+        pendingPlan=plan;
+      }
       if (!plan.length) {
         const result = { status: 'incomplete', observations: [], progress: 0, total: 0, diagnostic: 'Not enough source data to create searches' };
         store.set(result);
         return result;
       }
+      if(!pendingPlan.length&&retryIncomplete){
+        const result={...current,status:'incomplete',observations:previousCaptures,plan,progress:plan.length,total:plan.length,diagnostic:current.diagnostic||'All planned searches are already complete.'};
+        store.set(result);return result;
+      }
+      store.set({searchGroup:group,plan,observations:previousCaptures,results:[],activeQuery:null,progress:previousCaptures.length,total:plan.length});
+      if(!pendingPlan.length)return {status:'completed',observations:previousCaptures,plan,progress:plan.length,total:plan.length};
       searchSession=Adapter.beginSearchSession?.(current.profile) || null;
       if(searchSession?.ok===false){
-        const result={status:'incomplete',observations:[],results:[],activeQuery:null,diagnostic:searchSession.diagnostic};
+        const result={status:'incomplete',observations:previousCaptures,results:[],plan,searchGroup:group,progress:previousCaptures.length,total:plan.length,activeQuery:null,diagnostic:searchSession.diagnostic};
         store.set(result);return result;
       }
       runner = Runner.createRunController({
-        adapter: (query, runOptions) => Adapter.execute(query, { ...runOptions, session:searchSession, timeoutMs: queryTimeoutMs, stableMs, profile: current.profile, isCurrent:() => { refresh(); return !destroyed && revision === runRevision; } }),
-        onState: state => { if (!destroyed && runRevision === revision) store.set(state.status === 'completed' ? {...state,status:'running'} : state); },
+        adapter: (query, runOptions) => Adapter.execute(query, { ...runOptions, session:searchSession, timeoutMs: queryTimeoutMs-5000, stableMs, profile: current.profile, isCurrent:() => { refresh(); return !destroyed && revision === runRevision; } }),
+        onState: state => {
+          if (!destroyed && runRevision === revision) {
+            const merged={...state,observations:[...previousCaptures,...(state.observations||[])],progress:previousCaptures.length+(state.progress||0),total:plan.length,plan,searchGroup:group};
+            store.set(merged.status === 'completed' ? {...merged,status:'running'} : merged);
+          }
+        },
         queryTimeoutMs,
         runTimeoutMs: plan.length * queryTimeoutMs + Math.max(0,plan.length-1) * safetyDelayMs + 5000,
         safetyDelayMs,
         stopOnIncomplete: true
       });
-      const runResult = await runner.start(plan);
+      let runResult = await runner.start(pendingPlan);
       refresh();
       if (destroyed || runRevision !== revision) return { status: 'cancelled', observations: [], results: [] };
+      runResult={...runResult,observations:[...previousCaptures,...(runResult.observations||[])],progress:previousCaptures.length+(runResult.progress||0),total:plan.length};
       const currentQueryIds = new Set(plan.map(query => query.id));
-      const searched = (runResult.observations || [])
+      const allSearchesComplete=runResult.status==='completed'&&runResult.observations.length===plan.length&&runResult.observations.every(observation=>observation.status==='complete');
+      const searched = (allSearchesComplete ? runResult.observations : [])
         .filter(observation => observation.status === 'complete' && currentQueryIds.has(observation.queryId))
         .flatMap(observation => (observation.rows || []).map(candidate => ({ queryId: observation.queryId, candidate })));
-      const results = Engine.consolidateCandidates(current.source, searched);
-      const tdIds = group === 'all' && Engine.getTopTdIds ? Engine.getTopTdIds(results) : [];
+      const results = allSearchesComplete ? Engine.consolidateCandidates(current.source, searched) : [];
+      const tdIds = allSearchesComplete && group === 'all' && Engine.getTopTdIds ? Engine.getTopTdIds(results) : [];
       let linksSearch = null;
       if (group === 'all' && runResult.status === 'completed' && tdIds.length) {
         const aborter = new AbortController();
@@ -179,14 +210,14 @@
       return result;
     }
 
-    async function run(group = 'all') {
+    async function run(group = 'all', retryIncomplete = false) {
       if (destroyed) return {status:'cancelled',observations:[],results:[]};
       if (runBusy) return {status:'busy',diagnostic:'A search is already running. Use Pause or Stop before starting another.'};
       runBusy=true;
       let runRevision=revision;
       let completedResult;
       try {
-        const pending=runChecks(group);
+        const pending=runChecks(group,retryIncomplete);
         runRevision=revision;
         completedResult=await pending;return completedResult;
       } catch (error) {

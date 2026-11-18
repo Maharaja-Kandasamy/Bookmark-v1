@@ -25,6 +25,7 @@
     let cancelled = false;
     let resumeResolve = null;
     let currentAborter = null;
+    let currentQuery = null;
     let pauseStarted = 0;
     let pausedMs = 0;
 
@@ -39,20 +40,22 @@
       const elapsed = () => Date.now() - startedAt - pausedMs - (paused ? Date.now() - pauseStarted : 0);
       const observations = [];
       try {
-        publish({ status: 'running', progress: 0, total: plan.length, progressText: `Search 0 of ${plan.length}` });
+        publish({ status: 'running', progress: 0, total: plan.length, observations: [], activeQuery: null, progressText: `Search 0 of ${plan.length}` });
         for (let index = 0; index < plan.length; index += 1) {
           if (cancelled) break;
           await awaitResume();
           if (cancelled || elapsed() >= runTimeoutMs) break;
           const query = plan[index];
-          publish({ status: 'waiting', progress: index + 1, total: plan.length, activeQuery: query, progressText: `Search ${index + 1} of ${plan.length}` });
+          currentQuery = query;
+          publish({ status: 'waiting', progress: index + 1, total: plan.length, observations, activeQuery: query, progressText: `Search ${index + 1} of ${plan.length}` });
           const remainingMs = Math.max(1, runTimeoutMs - elapsed());
           const aborter = new AbortController();
           currentAborter = aborter;
           const result = await timeout(Promise.resolve().then(() => adapter(query, { signal: aborter.signal })).catch(error => ({status:'incomplete',rows:[],diagnostic:'Search could not finish: '+String(error?.message || 'Unexpected failure').split(/[\r\n]/)[0].slice(0,180)})), Math.min(queryTimeoutMs, remainingMs), () => aborter.abort(),aborter.signal);
           currentAborter = null;
           observations.push({ queryId: query.id, query, ...result });
-          publish({ status: 'running', progress: index + 1, total: plan.length, observations, progressText: `Search ${index + 1} of ${plan.length}` });
+          currentQuery = null;
+          publish({ status: 'running', progress: index + 1, total: plan.length, observations, activeQuery: null, completedQuery: query, progressText: `Search ${index + 1} of ${plan.length}` });
           if(options.stopOnIncomplete && result.status !== 'complete') break;
           if (index < plan.length - 1 && !cancelled) await wait(safetyDelayMs);
         }
@@ -61,7 +64,7 @@
         const status = cancelled ? 'cancelled' : incomplete ? 'incomplete' : 'completed';
         const failure = observations.find(item => item.status !== 'complete');
         const diagnostic = cancelled ? 'Search stopped.' : incomplete ? ((failure?.diagnostic || 'Not all checks finished. Retry the incomplete searches.') + (options.stopOnIncomplete && failure ? ' No further searches were submitted. Review the page before retrying.' : '')) : '';
-        const result = { status, observations, progress: observations.length, total: plan.length, diagnostic };
+        const result = { status, observations, activeQuery: null, progress: observations.length, total: plan.length, diagnostic };
         publish(result);
         return result;
       } finally {
@@ -72,7 +75,7 @@
     return {
       start,
       pause() { if (active && !paused) { paused = true; pauseStarted = Date.now(); publish({ status: 'paused' }); } },
-      resume() { if (active && paused) { pausedMs += Date.now() - pauseStarted; paused = false; if (resumeResolve) resumeResolve(); resumeResolve = null; publish({ status: 'running' }); } },
+      resume() { if (active && paused) { pausedMs += Date.now() - pauseStarted; paused = false; if (resumeResolve) resumeResolve(); resumeResolve = null; publish({ status: currentQuery ? 'waiting' : 'running', activeQuery: currentQuery }); } },
       cancel() { cancelled = true; paused = false; currentAborter?.abort(); if (resumeResolve) resumeResolve(); resumeResolve = null; publish({ status: 'cancelled' }); },
       isActive() { return active; }
     };

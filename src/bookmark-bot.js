@@ -1,5 +1,5 @@
 (function (root) {
-  function mount({ document, window, store, controller, lifecycle, onKilled }) {
+  function mount({ document, window, store, controller, lifecycle, recovery, onKilled }) {
     const Engine = root.PickerDuplicateEngine;
     const Layout = root.PickerBotLayout;
     const host = document.createElement('div');
@@ -14,6 +14,7 @@
         .notice[data-tone=warning]{background:#fffbeb;border-color:#fde68a;color:#92400e;font-weight:600}
         .quick-searches{position:absolute;bottom:calc(100% + 4px);left:calc(50% + var(--toolbar-offset,0px));transform:translateX(-50%);display:flex;gap:3px;padding:3px;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 2px 8px #0f172a18}.quick-search{width:25px;height:25px;padding:0;border:1px solid #cbd5e1;border-radius:5px;background:#fff;color:#1e40af;font:600 10px Segoe UI,sans-serif;cursor:pointer}.quick-search:hover{background:#eff6ff}.quick-search:disabled{opacity:.4;cursor:not-allowed}.quick-search:focus-visible{outline:2px solid #2563eb;outline-offset:2px}
         .bot-status{position:absolute;right:calc(100% + 10px);bottom:42px;display:flex;align-items:center;gap:8px;width:max-content;max-width:min(290px,calc(100vw - 164px));flex-wrap:wrap;padding:7px 9px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;color:#334155;box-shadow:0 2px 8px #0f172a18;font:500 11px Segoe UI,sans-serif}.bot-status[hidden]{display:none}.status-right .bot-status{right:auto;left:calc(100% + 10px)}.bot-progress{max-width:160px;overflow-wrap:anywhere}.quick-pause{border:1px solid #bfdbfe;background:#eff6ff;color:#1e40af;border-radius:5px;padding:4px 7px;font-size:10px;cursor:pointer}.quick-pause[hidden]{display:none}.quick-stop{border:1px solid #fecaca;background:#fef2f2;color:#991b1b;border-radius:5px;padding:4px 7px;font-size:10px;cursor:pointer}.quick-stop[hidden]{display:none}.conflicts{color:#92400e!important}.source-inference{font-size:10px;color:#64748b}
+        .capture-note{font-size:9px;line-height:1.4;color:var(--muted);margin:-2px 0 7px}.captures{display:grid;gap:7px;max-height:210px;overflow:auto;overscroll-behavior:contain}.capture{border:1px solid var(--border);border-left:3px solid #94a3b8;border-radius:7px;padding:8px;background:#fff}.capture[data-status=searching]{border-left-color:var(--accent);background:#f8fbff}.capture[data-status=complete]{border-left-color:var(--success)}.capture[data-status=incomplete]{border-left-color:var(--error)}.capture-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;font-size:10px}.capture-head strong{min-width:0;overflow-wrap:anywhere}.capture-state{flex:none;color:var(--muted);font-size:9px}.capture[data-status=searching] .capture-state{color:var(--accent);font-weight:650}.capture-meta{font-size:9px;color:var(--muted);margin-top:3px}.capture-row{padding:5px 0 0;margin-top:5px;border-top:1px solid #edf0f4;font-size:9px;line-height:1.4}.capture-row strong{display:block;color:#334155}.capture-row span{display:block;color:var(--muted);overflow-wrap:anywhere}.capture-diagnostic{font-size:9px;color:var(--error);margin-top:4px;overflow-wrap:anywhere}
         ${root.PickerBookmarkRobot.css}
       </style>
       <div class="shell" data-state="ready">
@@ -24,7 +25,7 @@
         </button>
         <section class="panel" aria-label="Picker Bookmark v1">
           <div class="head"><img class="logo" src="data:image/png;base64,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" alt="Picker logo"><div><div class="title">Picker Bookmark v1</div><div class="sub">Store and Retail duplicate checks</div></div><button class="btn close" data-icon="close" aria-label="Close panel"></button></div>
-          <div class="scroll"><div class="source"><strong class="source-name">Reading source</strong><div class="meta source-meta"></div></div><div class="fields"></div><div class="notice" role="status">Ready.</div><div class="label">Duplicate checks</div><div class="progress"><div class="fill"></div></div><div class="meta progress-text"></div><div class="grid controls"><button class="btn primary run" data-icon="play">Run All Checks</button><button class="btn" data-search="banner">Banner</button><button class="btn" data-search="bannerState">Banner + State</button><button class="btn" data-search="address">Address</button><button class="btn" data-search="phone">Phone</button><button class="btn" data-search="store">Store</button><button class="btn retry" data-icon="refresh">Retry Incomplete</button><button class="btn pause" data-icon="pause">Pause</button><button class="btn cancel" data-icon="square">Cancel</button></div><div class="label">Store tools</div><div class="grid"><button class="btn google-search" data-icon="search">Google Search</button><button class="btn google-banner-state" data-icon="search">Google Banner + State</button><button class="btn google-banner-city" data-icon="search">Google Banner + City</button><button class="btn address-search" data-icon="search">Google Address Search</button><button class="btn map-search" data-icon="map">Map Address Search</button><button class="btn copy-store" data-icon="copy">Copy Store Data</button></div><div class="label">Results</div><div class="results"></div></div>
+          <div class="scroll"><div class="source"><strong class="source-name">Reading source</strong><div class="meta source-meta"></div></div><div class="fields"></div><div class="notice" role="status">Ready.</div><div class="label">Duplicate checks</div><div class="progress"><div class="fill"></div></div><div class="meta progress-text"></div><div class="grid controls"><button class="btn primary run" data-icon="play">Run All Checks</button><button class="btn" data-search="banner">Banner</button><button class="btn" data-search="bannerState">Banner + State</button><button class="btn" data-search="address">Address</button><button class="btn" data-search="phone">Phone</button><button class="btn" data-search="store">Store</button><button class="btn retry" data-icon="refresh">Retry Incomplete</button><button class="btn pause" data-icon="pause">Pause</button><button class="btn cancel" data-icon="square">Cancel</button><button class="btn recover">Recover last GSRS screen</button></div><div class="label">Store tools</div><div class="grid"><button class="btn google-search" data-icon="search">Google Search</button><button class="btn google-banner-state" data-icon="search">Google Banner + State</button><button class="btn google-banner-city" data-icon="search">Google Banner + City</button><button class="btn address-search" data-icon="search">Google Address Search</button><button class="btn map-search" data-icon="map">Map Address Search</button><button class="btn copy-store" data-icon="copy">Copy Store Data</button></div><div class="label">Live search captures</div><div class="capture-note">Each query appears here after its results are captured. Final comparison and ranking follow when all searches finish.</div><div class="captures" role="log" aria-live="polite"></div><div class="label">Ranked results</div><div class="results"></div></div>
           <div class="actions"><button class="btn danger kill" data-icon="power">Kill Bot</button></div>
         </section>
       </div>`;
@@ -48,7 +49,7 @@
     const shell = $('.shell');
     const panel = $('.panel');
     const EMPTY_SOURCE = {}, EMPTY_RESULTS = [];
-    let renderedSourceKey,renderedResults,renderedEmptyStatus,availablePlan=[],renderFrame=null,pendingState,positioned=false,anchorKey='';
+    let renderedSourceKey,renderedResults,renderedEmptyStatus,renderedCaptureKey='',availablePlan=[],renderFrame=null,pendingState,positioned=false,anchorKey='';
     let open = false;
     let state = store.get() || {};
     let drag = null;
@@ -58,6 +59,7 @@
     let killing = false;
     let killed = false;
     let killTimer = null;
+    let recoveryTask = null;
     const robot = $('#astrobot-svg');
     const motionStates = ['idle','blinking','waving','thinking','celebrating','dragging','landing','killing'];
     const restingMotion = () => ['running','waiting'].includes(state.status) ? 'thinking' : ['paused','error','incomplete'].includes(state.status) ? 'blinking' : 'idle';
@@ -142,12 +144,62 @@
       const manualRequired = !state.source && !!state.diagnostic;
       $('.notice').dataset.tone = manualRequired ? 'warning' : 'info';
       $('.notice').setAttribute('role', manualRequired ? 'alert' : 'status');
+      const observations = Array.isArray(state.observations) ? state.observations : [];
+      const liveQuery = ['waiting','paused'].includes(state.status) ? state.activeQuery : null;
+      const captureKey = JSON.stringify([state.status,liveQuery?.id,observations.map(item=>[item.queryId,item.status,item.rows||[],item.diagnostic])]);
+      if(captureKey!==renderedCaptureKey){
+        renderedCaptureKey=captureKey;
+        const captures=$('.captures');captures.textContent='';
+        const addCapture=(label,statusText,status,rows=[],diagnostic='')=>{
+          const card=document.createElement('article');card.className='capture';card.dataset.status=status;
+          const head=document.createElement('div');head.className='capture-head';
+          const title=document.createElement('strong');title.textContent=label;
+          const stateText=document.createElement('span');stateText.className='capture-state';stateText.textContent=statusText;
+          head.append(title,stateText);card.appendChild(head);
+          if(status!=='searching'){
+            const meta=document.createElement('div');meta.className='capture-meta';
+            meta.textContent=status==='complete'?(rows.length?rows.length+' candidate row'+(rows.length===1?'':'s')+' captured':'Search complete · no matches')
+              :(rows.length?'Partial capture · '+rows.length+' row'+(rows.length===1?'':'s')+' before this search stopped':'No result rows captured');
+            card.appendChild(meta);
+          }
+          rows.forEach((row,index)=>{
+            const item=document.createElement('div');item.className='capture-row';
+            const name=document.createElement('strong');name.textContent=row.bannerName||row.storeName||('SL_ID '+(row.slId||'Unknown candidate'));
+            const detail=document.createElement('span');
+            detail.textContent=[row.slId&&('SL_ID '+row.slId),row.storeNumber&&('Store #'+row.storeNumber),[row.address,row.city,row.state,row.zip].filter(Boolean).join(', '),row.phone].filter(Boolean).join(' · ')||('Candidate '+(index+1));
+            item.append(name,detail);card.appendChild(item);
+          });
+          if(diagnostic){const detail=document.createElement('div');detail.className='capture-diagnostic';detail.textContent=diagnostic;card.appendChild(detail);}
+          captures.appendChild(card);
+        };
+        if(liveQuery)addCapture(liveQuery.label||liveQuery.id||'Current search',state.status==='paused'?'Paused · current search may finish':'Searching · waiting for GSRS results','searching');
+        observations.forEach((item,index)=>{
+          const rows=Array.isArray(item.rows)?item.rows:[];
+          const complete=item.status==='complete';
+          addCapture(item.query?.label||item.query?.id||('Search '+(index+1)),complete?'Captured':item.status==='cancelled'?'Stopped':'Incomplete',complete?'complete':'incomplete',rows,item.diagnostic||'');
+        });
+        if(!liveQuery&&!observations.length){
+          const empty=document.createElement('div');empty.className='empty';empty.textContent='Captured rows for each search will appear here.';captures.appendChild(empty);
+        }
+        if(liveQuery||observations.length){
+          const scrollArea=$('.scroll');
+          scrollArea.scrollTop+=captures.getBoundingClientRect().top-scrollArea.getBoundingClientRect().top;
+          captures.scrollTop=captures.scrollHeight;
+        }
+      }
+      if(state.status==='completed'&&observations.length){
+        $('.capture-note').textContent='All planned searches were captured. Comparison and ranking are complete below.';
+      }else if(['running','waiting','paused'].includes(state.status)){
+        $('.capture-note').textContent='The next search waits until the current result table settles. Captures stay unranked until the search plan finishes.';
+      }else{
+        $('.capture-note').textContent='Each query appears here after its results are captured. Final comparison and ranking follow when all searches finish.';
+      }
       const nextResults=state.results || EMPTY_RESULTS;
       if(sourceChanged || renderedResults!==nextResults || (!nextResults.length && renderedEmptyStatus!==state.status)){
       renderedResults=nextResults;renderedEmptyStatus=state.status;
       const results=$('.results'); results.textContent='';
       (state.results||[]).forEach((item,index)=>{ const candidate=item.candidate||item; const card=document.createElement('article'); card.className=`result ${item.directMatch?'direct':String(item.classification||'').startsWith('Exact')?'exact':''}`; card.innerHTML=`<div class="result-heading"><h4></h4><span class="record-status"></span></div><p class="kind"></p><p class="where"></p><p class="why"></p><p class="conflicts"></p><div class="result-actions"><button class="btn" data-icon="copy" data-result="td" data-index="${index}">TD Copy</button><button class="btn" data-icon="copy" data-result="full" data-index="${index}">Full Copy</button></div>`; const rawStatus=Engine.cleanText(candidate.storeStatus || candidate.copyFields?.find(field => /^(?:STORE_STATUS|SL_STORE_STATUS|RS_STORE_STATUS|STATUS)$/i.test(field.header))?.value); const pill=card.querySelector('.record-status'); const statusKey=rawStatus.toLowerCase().replace(/[^a-z]/g,''); const knownStatus={open:'Open',closed:'Closed',unverified:'Unverified',unverifyed:'Unverified',duplicate:'Duplicate'}; pill.textContent=knownStatus[statusKey] || rawStatus || 'Status unavailable'; pill.dataset.status=statusKey==='unverifyed'?'unverified':statusKey; pill.title=rawStatus ? `Record status: ${rawStatus}` : 'Record status was not provided'; card.querySelector('h4').textContent=candidate.bannerName||`SL_ID ${candidate.slId||'Unknown'}`; card.querySelector('.kind').textContent=item.classification||'Potential duplicate'; card.querySelector('.where').textContent=[candidate.address,candidate.city,candidate.state,candidate.zip].filter(Boolean).join(', '); const explanation=Engine.explainCandidate(state.source,item); card.querySelector('.why').textContent=explanation.summary; card.querySelector('.conflicts').textContent=explanation.conflicts.join('; '); decorateIcons(card); results.appendChild(card); });
-      if (!(state.results||[]).length) { const empty=document.createElement('div');empty.className='empty';empty.textContent=state.status==='completed'?'No duplicates found.':'Run checks to see duplicate results.';results.appendChild(empty); }
+      if (!(state.results||[]).length) { const empty=document.createElement('div');empty.className='empty';empty.textContent=state.status==='completed'?'No duplicates found.':['running','waiting','paused'].includes(state.status)?'Comparisons and ranking appear after all planned searches finish.':state.status==='incomplete'&&observations.length?'Some searches are incomplete. Retry them to finish capture before comparison and ranking.':'Run checks to see duplicate results.';results.appendChild(empty); }
       }
       if(open || !positioned){position();positioned=true;}
     }
@@ -170,6 +222,7 @@
     function finishKill() {
       if (killed) return;
       killed = true;
+      recoveryTask?.cancel?.();
       window.clearTimeout(killTimer);
       host.remove();
       onKilled();
@@ -198,10 +251,15 @@
       if(target.classList.contains('bot')) { if(suppressClick){suppressClick=false;return;} animateRobot('waving',1200); return open?closePanel():openPanel(); }
       if(target.classList.contains('close')) return closePanel();
       if(target.classList.contains('quick-stop')) { controller.cancel(); return; }
-      if(target.dataset.search || target.classList.contains('run') || target.classList.contains('retry')) { closePanel(); return controller.run(target.dataset.search || (target.classList.contains('retry') ? store.get()?.searchGroup || 'all' : 'all')).catch(error=>{ $('.notice').textContent=error.message; $('.bot').title=error.message; }); }
+      if(target.dataset.search || target.classList.contains('run') || target.classList.contains('retry')) { if(!open)openPanel(); return controller.run(target.dataset.search || (target.classList.contains('retry') ? store.get()?.searchGroup || 'all' : 'all'),target.classList.contains('retry')).catch(error=>{ $('.notice').textContent=error.message; $('.bot').title=error.message; }); }
       if(target.classList.contains('pause') || target.classList.contains('quick-pause')) return store.get()?.status==='paused'?controller.resume():controller.pause();
       if(target.classList.contains('cancel')) return controller.cancel();
       if(target.classList.contains('kill')) return kill();
+      if(target.classList.contains('recover')) {
+        recoveryTask?.cancel?.();
+        recoveryTask = recovery?.recover((message, error) => { $('.notice').textContent = message; $('.notice').dataset.error = error ? 'true' : 'false'; });
+        return;
+      }
       if(target.dataset.copy) return copy(state.source?.[target.dataset.copy]);
       if(target.classList.contains('google-banner-state') || target.classList.contains('google-banner-city')) {
         const source=state.source||{};

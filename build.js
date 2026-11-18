@@ -15,6 +15,7 @@ const inputs = [
   'src/bookmark-controller.js',
   'src/bookmark-robot.js',
   'src/bookmark-progress.js',
+  'src/bookmark-recovery.js',
   'src/bookmark-bot.js',
   'src/bookmark-entry.js'
 ];
@@ -54,8 +55,13 @@ fs.writeFileSync(path.join(root, 'gsrs-visuals-bookmark.html'), `<!DOCTYPE NETSC
 
 // Picker has a separate import and identity from GSRS Visuals.
 const pickerIcon = 'data:image/png;base64,' + fs.readFileSync(path.join(root, 'assets/picker-logo.png')).toString('base64');
-fs.writeFileSync(path.join(root, 'picker-bookmark.html'), `<!DOCTYPE NETSCAPE-Bookmark-file-1>
+fs.writeFileSync(path.join(root, 'picker-recovery-bookmark.html'), `<!DOCTYPE NETSCAPE-Bookmark-file-1>
 <META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">
-<TITLE>Picker Bookmark</TITLE><H1>Picker Bookmark</H1>
-<DL><p><DT><A HREF="${escapeAttr(bookmarkUrl)}" ICON="${pickerIcon}">Picker Bookmark v1</A></DL><p>
+<TITLE>Picker Recovery Bookmark</TITLE><H1>Picker Recovery Bookmark</H1>
+<DL><p><DT><A HREF="${escapeAttr(bookmarkUrl)}" ICON="${pickerIcon}">Picker Recovery</A></DL><p>
+`);
+fs.writeFileSync(path.join(root, 'picker-recovery-drag.html'), `<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Picker Recovery Bookmark</title><style>body{font:16px Segoe UI,Arial,sans-serif;max-width:680px;margin:10vh auto;padding:24px;color:#172033}a{display:inline-block;padding:14px 22px;border-radius:10px;background:#2563eb;color:white;font-weight:700;text-decoration:none}p{line-height:1.55}.note{color:#526078}</style>
+<h1>Picker Recovery Bookmark</h1><p>Drag this button to your browser bookmarks bar:</p><p><a href="${escapeAttr(bookmarkUrl)}" draggable="true">Picker Recovery</a></p><p class="note">Open GSRS Manual Match and launch this bookmark once to save the current Batch ID and Match Filter. If GSRS shows “Something went wrong,” open Picker and choose <b>Recover last GSRS screen</b>.</p></html>
 `);

@@ -208,6 +208,18 @@
   };
   const resultObservationRoot = dialog => byTestId(dialog, 'manual-match-search-table');
   const isResultActivity = (records,resultRoot) => !!resultRoot && (records || []).some(record => resultRoot.contains?.(record.target) || [...(record.addedNodes || []),...(record.removedNodes || [])].some(node => node===resultRoot || node.matches?.('[data-testid="manual-match-search-table"]') || node.querySelector?.('[data-testid="manual-match-search-table"]')));
+  const isVisible = element => {
+    if (!element) return false;
+    const rects = element.getClientRects?.();
+    if (rects && !rects.length) return false;
+    const view = element.ownerDocument?.defaultView;
+    for (let node = element; node?.nodeType === 1; node = node.parentElement) {
+      if (node.hidden || node.getAttribute?.('aria-hidden') === 'true') return false;
+      const style = view?.getComputedStyle?.(node);
+      if (style && (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0)) return false;
+    }
+    return true;
+  };
 
   function extractRows(dialog = findDialog()) {
     const table = byTestId(dialog, 'manual-match-search-table');
@@ -234,10 +246,11 @@
   }
 
   function submitAndWait(dialog,search,options={}) {
-    const timeoutMs=options.timeoutMs || 120000,stableMs=options.stableMs || 1500;
+    const timeoutMs=options.timeoutMs || 120000,stableMs=options.stableMs || 2500;
     if(options.signal?.aborted)return Promise.resolve({status:'incomplete',rows:[],diagnostic:'Search cancelled'});
     return new Promise(resolve => {
       let finished=false,timer,deadline,pending,observer,before,lastSignature,stableSince=0,sawMutation=false,sawBusy=false,dirty=true;
+      const submittedAt=Date.now();
       let observedRoot=resultObservationRoot(dialog);
       const observationOptions={childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['aria-busy']};
       const finish=result=>{
@@ -260,13 +273,17 @@
           }
           if(!nextRoot){stableSince=0;return;}
           const signature=dirty?tableSignature(live):lastSignature;dirty=false;
-          const busy=search.disabled || !!live.querySelector('[aria-busy="true"],.MuiCircularProgress-root,[role="progressbar"]');
+          const busy=search.disabled || live.getAttribute?.('aria-busy')==='true' || nextRoot.getAttribute?.('aria-busy')==='true' ||
+            [...(live.querySelectorAll?.('[aria-busy="true"],.MuiCircularProgress-root,.MuiLinearProgress-root,[role="progressbar"],[data-testid*="loading"],[class*="spinner"],[class*="Spinner"]') || [])].some(isVisible);
           const now=Date.now();
           if(signature!==lastSignature){lastSignature=signature;stableSince=now;}
           if(busy){sawBusy=true;stableSince=0;return;}
           if(!(sawMutation || sawBusy || signature!==before))return;
           if(!stableSince)stableSince=now;
-          if(now-stableSince>=stableMs)finish({status:'complete',rows:extractRows(live),diagnostic:''});
+          if(now-stableSince>=stableMs){
+            const rows=extractRows(live);
+            finish({status:'complete',rows,rowCount:rows.length,completedAt:now,elapsedMs:now-submittedAt,diagnostic:''});
+          }
         } catch(error){finish({status:'incomplete',rows:[],diagnostic:'Search could not finish: '+String(error?.message || 'The page changed').split(/[\r\n]/)[0].slice(0,180)});}
       };
       try {
@@ -281,7 +298,10 @@
           observer.observe(observedRoot.parentElement || observedRoot,observationOptions);
         }
         timer=setInterval(()=>{if(!observer)dirty=true;check();},150);
-        deadline=setTimeout(()=>finish({status:'incomplete',rows:[],diagnostic:`Result screen did not stabilize within ${Math.round(timeoutMs/1000)} seconds`}),timeoutMs);
+        deadline=setTimeout(()=>{
+          const partialRows=extractRows(findDialog() || dialog);
+          finish({status:'incomplete',rows:partialRows,rowCount:partialRows.length,partial:partialRows.length>0,elapsedMs:Date.now()-submittedAt,diagnostic:`Result screen did not stabilize within ${Math.round(timeoutMs/1000)} seconds`});
+        },timeoutMs);
         options.signal?.addEventListener('abort',onAbort,{once:true});
         search.click();check();
       } catch(error){finish({status:'incomplete',rows:[],diagnostic:'Search could not start: '+String(error?.message || 'The page changed').split(/[\r\n]/)[0].slice(0,180)});}

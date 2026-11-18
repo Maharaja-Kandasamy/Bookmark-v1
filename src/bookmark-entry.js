@@ -12,10 +12,11 @@
       }});
       store = root.PickerBookmarkStore.create({ status:'ready',results:[],observations:[] },{onError:lifecycle.reportError});
       controller = root.PickerBookmarkController.create({ document, window, store, lifecycle });
+      const recovery = root.PickerBookmarkRecovery.create({ document, window });
       controller.scan();
       let bot;
       instance = { open(){ controller.refresh(); bot.open(); }, kill(options){ bot.destroy(options); } };
-      bot = root.PickerBookmarkBot.mount({ document, window, store, controller, lifecycle, onKilled(){ if (window.__pickerBookmarkV1 === instance) delete window.__pickerBookmarkV1; } });
+      bot = root.PickerBookmarkBot.mount({ document, window, store, controller, lifecycle, recovery, onKilled(){ if (window.__pickerBookmarkV1 === instance) delete window.__pickerBookmarkV1; } });
       window.__pickerBookmarkV1 = instance;
       bot.open();
       return instance;
