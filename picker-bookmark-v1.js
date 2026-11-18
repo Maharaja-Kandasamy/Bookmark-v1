@@ -1510,7 +1510,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this);
 (function (root) {
   const STORAGE_KEY = 'picker-bookmark-v1-recovery';
-  const INPUT_JOBS_URL = 'https://gsrs-prod.azure-gsrs-p.nielsencsp.net/#/InputMMJobs';
+  const INPUT_JOBS_ROUTE = '#/InputMMJobs';
   const clean = value => String(value || '').replace(/\s+/g, ' ').trim();
   const key = value => clean(value).toLowerCase().replace(/[^a-z0-9]/g, '');
   const visible = element => {
@@ -1563,25 +1563,70 @@
   }
   function capture(doc, win) {
     const manual = [...doc.querySelectorAll('[data-testid="manual-match"]')].find(visible);
-    const filter = (manual && [...manual.querySelectorAll('#matchFilter')].find(visible)) || [...doc.querySelectorAll('#matchFilter')].find(visible);
-    const scope = doc.querySelector('.modal-content-cls') || doc.body;
-    const text = clean(scope?.innerText || scope?.textContent);
-    const batchId = clean(text.match(/Batch\s*Id\s*:\s*([\w-]+)/i)?.[1] || doc.querySelector('#batchId')?.value);
+    const inManual = manual && [...manual.querySelectorAll('#matchFilter, input[placeholder*="filter selected" i]')].find(visible);
+    const labeledFilter = [...doc.querySelectorAll('label')].find(label => visible(label) && key(label.textContent) === 'matchfilter');
+    const labeledInput = labeledFilter?.parentElement?.querySelector('input') || labeledFilter?.closest('.MuiFormControl-root')?.querySelector('input');
+    const filter = inManual || labeledInput || [...doc.querySelectorAll('#matchFilter, input[placeholder*="filter selected" i]')].find(visible);
+    const batchScopes = [...doc.querySelectorAll('.modal-content-cls')].filter(visible);
+    const batchText = batchScopes.map(scope => clean(scope.innerText || scope.textContent)).find(text => /Batch\s*Id\s*:\s*[\w-]+/i.test(text)) || clean(doc.body?.innerText || doc.body?.textContent);
+    const batchId = clean(batchText.match(/Batch\s*Id\s*:\s*([\w-]+)/i)?.[1] || doc.querySelector('#batchId')?.value);
     const filterName = clean(filter?.value);
-    return { batchId, filterName, noFilter: !filterName, filterCaptured: !!filter, capturedAt: Date.now(), sourceUrl: win.location.href };
+    const sourceUrl = win.location.href;
+    const target = inputJobsUrl(sourceUrl);
+    return { batchId, filterName, noFilter: !!filter && !filterName, filterCaptured: !!filter, capturedAt: Date.now(), sourceUrl, targetUrl: target?.href || '' };
+  }
+  function inputJobsUrl(sourceUrl) {
+    try {
+      const target = new URL(sourceUrl);
+      if (target.protocol !== 'https:' || !target.hostname.toLowerCase().startsWith('gsrs-')) return null;
+      target.hash = INPUT_JOBS_ROUTE;
+      return target;
+    } catch { return null; }
   }
   function create({ document: doc, window: win }) {
     const current = capture(doc, win);
     let previous = {};
     try { previous = JSON.parse(win.sessionStorage.getItem(STORAGE_KEY) || '{}'); } catch {}
+    const batchId = current.batchId || previous.batchId || '';
+    const sameBatch = !current.batchId || !previous.batchId || current.batchId === previous.batchId;
     const context = {
       ...current,
-      batchId: current.batchId || previous.batchId || '',
-      filterName: current.filterCaptured ? current.filterName : (previous.filterName || ''),
-      noFilter: current.filterCaptured ? !current.filterName : (previous.noFilter ?? true),
-      filterCaptured: current.filterCaptured || !!previous.filterCaptured,
+      batchId,
+      filterName: current.filterCaptured ? current.filterName : (sameBatch ? previous.filterName || '' : ''),
+      noFilter: current.filterCaptured ? current.noFilter : (sameBatch ? previous.noFilter ?? true : false),
+      filterCaptured: current.filterCaptured || (sameBatch && !!previous.filterCaptured),
+      sourceUrl: current.sourceUrl || previous.sourceUrl || '',
+      targetUrl: inputJobsUrl(current.sourceUrl || previous.sourceUrl || '')?.href || '',
     };
     try { win.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(context)); } catch {}
+    const contextListeners = new Set();
+    let captureInterval = 0;
+    const contextSnapshot = () => ({ batchId: context.batchId, filterName: context.filterName, noFilter: context.noFilter, filterCaptured: context.filterCaptured, sourceUrl: context.sourceUrl, targetUrl: context.targetUrl, capturedAt: context.capturedAt });
+    const publishContext = () => {
+      try { win.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(context)); } catch {}
+      const snapshot = contextSnapshot();
+      contextListeners.forEach(listener => { try { listener(snapshot); } catch {} });
+    };
+    function refreshContext() {
+      const fresh = capture(doc, win);
+      const batchChanged = !!fresh.batchId && !!context.batchId && fresh.batchId !== context.batchId;
+      let changed = false;
+      if (fresh.batchId && fresh.batchId !== context.batchId) { context.batchId = fresh.batchId; changed = true; }
+      if (fresh.filterCaptured) {
+        if (context.filterCaptured !== true || context.filterName !== fresh.filterName || context.noFilter !== fresh.noFilter) changed = true;
+        context.filterCaptured = true; context.filterName = fresh.filterName; context.noFilter = fresh.noFilter;
+      } else if (batchChanged && context.filterCaptured) {
+        context.filterCaptured = false; context.filterName = ''; context.noFilter = false; changed = true;
+      }
+      if (fresh.sourceUrl && fresh.sourceUrl !== context.sourceUrl) { context.sourceUrl = fresh.sourceUrl; changed = true; }
+      const targetUrl = inputJobsUrl(context.sourceUrl)?.href || '';
+      if (targetUrl !== context.targetUrl) { context.targetUrl = targetUrl; changed = true; }
+      if (changed) publishContext();
+      if (context.batchId && context.filterCaptured) { clearInterval(captureInterval); captureInterval = 0; }
+      return contextSnapshot();
+    }
+    const subscribe = listener => { contextListeners.add(listener); try { listener(contextSnapshot()); } catch {} return () => contextListeners.delete(listener); };
+    captureInterval = win.setInterval(refreshContext, 500);
     let timer = 0, stopped = false, stage = 'start', startedAt = 0, stableAt = 0, lastSignature = '', actionButton = null, actionAttempts = 0, reactClickTried = false, menuItemsBefore = new WeakSet(), overlaysBefore = new WeakSet(), filterBeforeSignature = '', filterSearchClicked = false;
     const elapsed = () => Date.now() - startedAt;
     const announce = (message, error = false) => { try { onStatus?.(message, error); } catch {} };
@@ -1589,9 +1634,12 @@
     function fail(message) { stopped = true; clearInterval(timer); announce(message, true); return false; }
     function done(message) { stopped = true; clearInterval(timer); announce(message, false); return true; }
     function routeToJobs() {
-      if (!win.location.href.startsWith(INPUT_JOBS_URL.split('#')[0])) return fail('Recovery stopped: this bookmark only works on the GSRS production site.');
-      const target = new URL(INPUT_JOBS_URL);
-      if (win.location.hash !== target.hash) { stage = 'jobs'; win.location.hash = target.hash; startedAt = Date.now(); announce('Opening Input MM Jobs…'); return; }
+      const target = inputJobsUrl(win.location.href);
+      if (!target) return fail('Recovery needs an HTTPS GSRS address whose host starts with “gsrs-”. Open Picker from the GSRS Manual Match screen.');
+      context.sourceUrl = win.location.href;
+      context.targetUrl = target.href;
+      publishContext();
+      if (win.location.hash !== INPUT_JOBS_ROUTE) { stage = 'jobs'; win.location.hash = INPUT_JOBS_ROUTE; startedAt = Date.now(); announce('Opening Input MM Jobs…'); return; }
       stage = 'batch-search'; startedAt = Date.now();
     }
     function findTableByHeaders(required, scope = doc) {
@@ -1638,8 +1686,12 @@
       if (stopped) return;
       try {
         if (stage === 'start') {
+          refreshContext();
           if (!context.batchId) return fail('Recovery could not find a Batch ID from when Picker launched. Reopen Picker on the Manual Match screen and try again.');
-          if (!context.filterCaptured) return fail('Recovery could not read the Match Filter setting from when Picker launched. Reopen Picker on the Manual Match screen and try again.');
+          if (!context.filterCaptured) {
+            if (elapsed() < 15000) { announce(`Waiting for the Manual Match settings to load… Batch ID: ${context.batchId}; Match Filter: not captured yet.`); return; }
+            return fail(`Recovery could not read the Match Filter setting. Batch ID: ${context.batchId}; Match Filter: not captured. Reopen Picker after the Manual Match screen has finished loading.`);
+          }
           routeToJobs(); return;
         }
         if (elapsed() > 120000) return fail('GSRS took too long to respond. Wait for the page to finish, then start recovery again.');
@@ -1770,11 +1822,13 @@
       if (stopped) { stage = 'start'; stopped = false; }
       onStatus = statusCallback;
       startedAt = Date.now();
+      refreshContext();
       timer = win.setInterval(tick, 400);
       tick();
       return { cancel() { stopped = true; win.clearInterval(timer); } };
     }
-    return { context, recover };
+    function dispose() { if (captureInterval) win.clearInterval(captureInterval); captureInterval = 0; contextListeners.clear(); }
+    return { context, recover, subscribe, refreshContext, dispose };
   }
   root.PickerBookmarkRecovery = { create, capture };
 })(typeof globalThis !== 'undefined' ? globalThis : this);
@@ -1794,7 +1848,7 @@
         .notice[data-tone=warning]{background:#fffbeb;border-color:#fde68a;color:#92400e;font-weight:600}
         .quick-searches{position:absolute;bottom:calc(100% + 4px);left:calc(50% + var(--toolbar-offset,0px));transform:translateX(-50%);display:flex;gap:3px;padding:3px;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 2px 8px #0f172a18}.quick-search{width:25px;height:25px;padding:0;border:1px solid #cbd5e1;border-radius:5px;background:#fff;color:#1e40af;font:600 10px Segoe UI,sans-serif;cursor:pointer}.quick-search:hover{background:#eff6ff}.quick-search:disabled{opacity:.4;cursor:not-allowed}.quick-search:focus-visible{outline:2px solid #2563eb;outline-offset:2px}
         .bot-status{position:absolute;right:calc(100% + 10px);bottom:42px;display:flex;align-items:center;gap:8px;width:max-content;max-width:min(290px,calc(100vw - 164px));flex-wrap:wrap;padding:7px 9px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;color:#334155;box-shadow:0 2px 8px #0f172a18;font:500 11px Segoe UI,sans-serif}.bot-status[hidden]{display:none}.status-right .bot-status{right:auto;left:calc(100% + 10px)}.bot-progress{max-width:160px;overflow-wrap:anywhere}.quick-pause{border:1px solid #bfdbfe;background:#eff6ff;color:#1e40af;border-radius:5px;padding:4px 7px;font-size:10px;cursor:pointer}.quick-pause[hidden]{display:none}.quick-stop{border:1px solid #fecaca;background:#fef2f2;color:#991b1b;border-radius:5px;padding:4px 7px;font-size:10px;cursor:pointer}.quick-stop[hidden]{display:none}.conflicts{color:#92400e!important}.source-inference{font-size:10px;color:#64748b}
-        .capture-note{font-size:9px;line-height:1.4;color:var(--muted);margin:-2px 0 7px}.captures{display:grid;gap:7px;max-height:210px;overflow:auto;overscroll-behavior:contain}.capture{border:1px solid var(--border);border-left:3px solid #94a3b8;border-radius:7px;padding:8px;background:#fff}.capture[data-status=searching]{border-left-color:var(--accent);background:#f8fbff}.capture[data-status=complete]{border-left-color:var(--success)}.capture[data-status=incomplete]{border-left-color:var(--error)}.capture-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;font-size:10px}.capture-head strong{min-width:0;overflow-wrap:anywhere}.capture-state{flex:none;color:var(--muted);font-size:9px}.capture[data-status=searching] .capture-state{color:var(--accent);font-weight:650}.capture-meta{font-size:9px;color:var(--muted);margin-top:3px}.capture-row{padding:5px 0 0;margin-top:5px;border-top:1px solid #edf0f4;font-size:9px;line-height:1.4}.capture-row strong{display:block;color:#334155}.capture-row span{display:block;color:var(--muted);overflow-wrap:anywhere}.capture-diagnostic{font-size:9px;color:var(--error);margin-top:4px;overflow-wrap:anywhere}
+        .capture-note{font-size:9px;line-height:1.4;color:var(--muted);margin:-2px 0 7px}.captures{display:grid;gap:7px;max-height:210px;overflow:auto;overscroll-behavior:contain}.capture{border:1px solid var(--border);border-left:3px solid #94a3b8;border-radius:7px;padding:8px;background:#fff}.capture[data-status=searching]{border-left-color:var(--accent);background:#f8fbff}.capture[data-status=complete]{border-left-color:var(--success)}.capture[data-status=incomplete]{border-left-color:var(--error)}.capture-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;font-size:10px}.capture-head strong{min-width:0;overflow-wrap:anywhere}.capture-state{flex:none;color:var(--muted);font-size:9px}.capture[data-status=searching] .capture-state{color:var(--accent);font-weight:650}.capture-meta{font-size:9px;color:var(--muted);margin-top:3px}.capture-row{padding:5px 0 0;margin-top:5px;border-top:1px solid #edf0f4;font-size:9px;line-height:1.4}.capture-row strong{display:block;color:#334155}.capture-row span{display:block;color:var(--muted);overflow-wrap:anywhere}.capture-diagnostic{font-size:9px;color:var(--error);margin-top:4px;overflow-wrap:anywhere}.recovery-meta{white-space:pre-wrap;border-top:1px solid var(--border);padding-top:6px;margin-top:7px}
         ${root.PickerBookmarkRobot.css}
       </style>
       <div class="shell" data-state="ready">
@@ -1805,7 +1859,7 @@
         </button>
         <section class="panel" aria-label="Picker Bookmark v1">
           <div class="head"><img class="logo" src="data:image/png;base64,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" alt="Picker logo"><div><div class="title">Picker Bookmark v1</div><div class="sub">Store and Retail duplicate checks</div></div><button class="btn close" data-icon="close" aria-label="Close panel"></button></div>
-          <div class="scroll"><div class="source"><strong class="source-name">Reading source</strong><div class="meta source-meta"></div></div><div class="fields"></div><div class="notice" role="status">Ready.</div><div class="label">Duplicate checks</div><div class="progress"><div class="fill"></div></div><div class="meta progress-text"></div><div class="grid controls"><button class="btn primary run" data-icon="play">Run All Checks</button><button class="btn" data-search="banner">Banner</button><button class="btn" data-search="bannerState">Banner + State</button><button class="btn" data-search="address">Address</button><button class="btn" data-search="phone">Phone</button><button class="btn" data-search="store">Store</button><button class="btn retry" data-icon="refresh">Retry Incomplete</button><button class="btn pause" data-icon="pause">Pause</button><button class="btn cancel" data-icon="square">Cancel</button><button class="btn recover">Recover last GSRS screen</button></div><div class="label">Store tools</div><div class="grid"><button class="btn google-search" data-icon="search">Google Search</button><button class="btn google-banner-state" data-icon="search">Google Banner + State</button><button class="btn google-banner-city" data-icon="search">Google Banner + City</button><button class="btn address-search" data-icon="search">Google Address Search</button><button class="btn map-search" data-icon="map">Map Address Search</button><button class="btn copy-store" data-icon="copy">Copy Store Data</button></div><div class="label">Live search captures</div><div class="capture-note">Each query appears here after its results are captured. Final comparison and ranking follow when all searches finish.</div><div class="captures" role="log" aria-live="polite"></div><div class="label">Ranked results</div><div class="results"></div></div>
+          <div class="scroll"><div class="source"><strong class="source-name">Reading source</strong><div class="meta source-meta"></div><div class="meta recovery-meta" role="status"></div></div><div class="fields"></div><div class="notice" role="status">Ready.</div><div class="label">Duplicate checks</div><div class="progress"><div class="fill"></div></div><div class="meta progress-text"></div><div class="grid controls"><button class="btn primary run" data-icon="play">Run All Checks</button><button class="btn" data-search="banner">Banner</button><button class="btn" data-search="bannerState">Banner + State</button><button class="btn" data-search="address">Address</button><button class="btn" data-search="phone">Phone</button><button class="btn" data-search="store">Store</button><button class="btn retry" data-icon="refresh">Retry Incomplete</button><button class="btn pause" data-icon="pause">Pause</button><button class="btn cancel" data-icon="square">Cancel</button><button class="btn recover">Recover last GSRS screen</button></div><div class="label">Store tools</div><div class="grid"><button class="btn google-search" data-icon="search">Google Search</button><button class="btn google-banner-state" data-icon="search">Google Banner + State</button><button class="btn google-banner-city" data-icon="search">Google Banner + City</button><button class="btn address-search" data-icon="search">Google Address Search</button><button class="btn map-search" data-icon="map">Map Address Search</button><button class="btn copy-store" data-icon="copy">Copy Store Data</button></div><div class="label">Live search captures</div><div class="capture-note">Each query appears here after its results are captured. Final comparison and ranking follow when all searches finish.</div><div class="captures" role="log" aria-live="polite"></div><div class="label">Ranked results</div><div class="results"></div></div>
           <div class="actions"><button class="btn danger kill" data-icon="power">Kill Bot</button></div>
         </section>
       </div>`;
@@ -1889,6 +1943,9 @@
       const fields = $('.fields'); fields.textContent = '';
       [['bannerName','Banner'],['storeNumber','Store #'],['address','Address'],['city','City'],['state','State'],['zip','ZIP'],['phone','Phone']].forEach(([key,label]) => { const button=document.createElement('button'); button.className='field'; button.dataset.copy=key; button.disabled=!source[key]; button.innerHTML=`<span>${label}</span><b></b>`; button.querySelector('b').textContent=source[key]||'Not available'; fields.appendChild(button); });
       }
+      const recoveryContext = state.recoveryContext || recovery?.context || {};
+      const recoveryFilter = !recoveryContext.filterCaptured ? 'Not captured yet' : recoveryContext.noFilter ? 'No Filter Selected' : (recoveryContext.filterName || 'Not captured');
+      $('.recovery-meta').textContent = `Recovery · Batch ID: ${recoveryContext.batchId || 'Not captured yet'} · Match Filter: ${recoveryFilter}\nReturn URL: ${recoveryContext.targetUrl || 'Waiting for an HTTPS GSRS URL ending in #/InputMMJobs'}`;
       const total = state.total || state.plan?.length || 0; const progress = state.progress || 0;
       const googleQuery = [source.bannerName, source.address, source.city, source.state, source.zip].filter(Boolean).join(' ');
       $('.fill').style.width = total ? `${Math.min(100, progress / total * 100)}%` : '0%';
@@ -2114,6 +2171,10 @@
       store = root.PickerBookmarkStore.create({ status:'ready',results:[],observations:[] },{onError:lifecycle.reportError});
       controller = root.PickerBookmarkController.create({ document, window, store, lifecycle });
       const recovery = root.PickerBookmarkRecovery?.create({ document, window }) || null;
+      if (recovery) {
+        recovery.subscribe?.(recoveryContext => store.set({ recoveryContext }));
+        lifecycle.add(() => recovery.dispose?.());
+      }
       controller.scan();
       let bot;
       instance = { open(){ controller.refresh(); bot.open(); }, kill(options){ bot.destroy(options); } };

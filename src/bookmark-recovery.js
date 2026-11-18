@@ -1,6 +1,6 @@
 (function (root) {
   const STORAGE_KEY = 'picker-bookmark-v1-recovery';
-  const INPUT_JOBS_URL = 'https://gsrs-prod.azure-gsrs-p.nielsencsp.net/#/InputMMJobs';
+  const INPUT_JOBS_ROUTE = '#/InputMMJobs';
   const clean = value => String(value || '').replace(/\s+/g, ' ').trim();
   const key = value => clean(value).toLowerCase().replace(/[^a-z0-9]/g, '');
   const visible = element => {
@@ -53,25 +53,70 @@
   }
   function capture(doc, win) {
     const manual = [...doc.querySelectorAll('[data-testid="manual-match"]')].find(visible);
-    const filter = (manual && [...manual.querySelectorAll('#matchFilter')].find(visible)) || [...doc.querySelectorAll('#matchFilter')].find(visible);
-    const scope = doc.querySelector('.modal-content-cls') || doc.body;
-    const text = clean(scope?.innerText || scope?.textContent);
-    const batchId = clean(text.match(/Batch\s*Id\s*:\s*([\w-]+)/i)?.[1] || doc.querySelector('#batchId')?.value);
+    const inManual = manual && [...manual.querySelectorAll('#matchFilter, input[placeholder*="filter selected" i]')].find(visible);
+    const labeledFilter = [...doc.querySelectorAll('label')].find(label => visible(label) && key(label.textContent) === 'matchfilter');
+    const labeledInput = labeledFilter?.parentElement?.querySelector('input') || labeledFilter?.closest('.MuiFormControl-root')?.querySelector('input');
+    const filter = inManual || labeledInput || [...doc.querySelectorAll('#matchFilter, input[placeholder*="filter selected" i]')].find(visible);
+    const batchScopes = [...doc.querySelectorAll('.modal-content-cls')].filter(visible);
+    const batchText = batchScopes.map(scope => clean(scope.innerText || scope.textContent)).find(text => /Batch\s*Id\s*:\s*[\w-]+/i.test(text)) || clean(doc.body?.innerText || doc.body?.textContent);
+    const batchId = clean(batchText.match(/Batch\s*Id\s*:\s*([\w-]+)/i)?.[1] || doc.querySelector('#batchId')?.value);
     const filterName = clean(filter?.value);
-    return { batchId, filterName, noFilter: !filterName, filterCaptured: !!filter, capturedAt: Date.now(), sourceUrl: win.location.href };
+    const sourceUrl = win.location.href;
+    const target = inputJobsUrl(sourceUrl);
+    return { batchId, filterName, noFilter: !!filter && !filterName, filterCaptured: !!filter, capturedAt: Date.now(), sourceUrl, targetUrl: target?.href || '' };
+  }
+  function inputJobsUrl(sourceUrl) {
+    try {
+      const target = new URL(sourceUrl);
+      if (target.protocol !== 'https:' || !target.hostname.toLowerCase().startsWith('gsrs-')) return null;
+      target.hash = INPUT_JOBS_ROUTE;
+      return target;
+    } catch { return null; }
   }
   function create({ document: doc, window: win }) {
     const current = capture(doc, win);
     let previous = {};
     try { previous = JSON.parse(win.sessionStorage.getItem(STORAGE_KEY) || '{}'); } catch {}
+    const batchId = current.batchId || previous.batchId || '';
+    const sameBatch = !current.batchId || !previous.batchId || current.batchId === previous.batchId;
     const context = {
       ...current,
-      batchId: current.batchId || previous.batchId || '',
-      filterName: current.filterCaptured ? current.filterName : (previous.filterName || ''),
-      noFilter: current.filterCaptured ? !current.filterName : (previous.noFilter ?? true),
-      filterCaptured: current.filterCaptured || !!previous.filterCaptured,
+      batchId,
+      filterName: current.filterCaptured ? current.filterName : (sameBatch ? previous.filterName || '' : ''),
+      noFilter: current.filterCaptured ? current.noFilter : (sameBatch ? previous.noFilter ?? true : false),
+      filterCaptured: current.filterCaptured || (sameBatch && !!previous.filterCaptured),
+      sourceUrl: current.sourceUrl || previous.sourceUrl || '',
+      targetUrl: inputJobsUrl(current.sourceUrl || previous.sourceUrl || '')?.href || '',
     };
     try { win.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(context)); } catch {}
+    const contextListeners = new Set();
+    let captureInterval = 0;
+    const contextSnapshot = () => ({ batchId: context.batchId, filterName: context.filterName, noFilter: context.noFilter, filterCaptured: context.filterCaptured, sourceUrl: context.sourceUrl, targetUrl: context.targetUrl, capturedAt: context.capturedAt });
+    const publishContext = () => {
+      try { win.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(context)); } catch {}
+      const snapshot = contextSnapshot();
+      contextListeners.forEach(listener => { try { listener(snapshot); } catch {} });
+    };
+    function refreshContext() {
+      const fresh = capture(doc, win);
+      const batchChanged = !!fresh.batchId && !!context.batchId && fresh.batchId !== context.batchId;
+      let changed = false;
+      if (fresh.batchId && fresh.batchId !== context.batchId) { context.batchId = fresh.batchId; changed = true; }
+      if (fresh.filterCaptured) {
+        if (context.filterCaptured !== true || context.filterName !== fresh.filterName || context.noFilter !== fresh.noFilter) changed = true;
+        context.filterCaptured = true; context.filterName = fresh.filterName; context.noFilter = fresh.noFilter;
+      } else if (batchChanged && context.filterCaptured) {
+        context.filterCaptured = false; context.filterName = ''; context.noFilter = false; changed = true;
+      }
+      if (fresh.sourceUrl && fresh.sourceUrl !== context.sourceUrl) { context.sourceUrl = fresh.sourceUrl; changed = true; }
+      const targetUrl = inputJobsUrl(context.sourceUrl)?.href || '';
+      if (targetUrl !== context.targetUrl) { context.targetUrl = targetUrl; changed = true; }
+      if (changed) publishContext();
+      if (context.batchId && context.filterCaptured) { clearInterval(captureInterval); captureInterval = 0; }
+      return contextSnapshot();
+    }
+    const subscribe = listener => { contextListeners.add(listener); try { listener(contextSnapshot()); } catch {} return () => contextListeners.delete(listener); };
+    captureInterval = win.setInterval(refreshContext, 500);
     let timer = 0, stopped = false, stage = 'start', startedAt = 0, stableAt = 0, lastSignature = '', actionButton = null, actionAttempts = 0, reactClickTried = false, menuItemsBefore = new WeakSet(), overlaysBefore = new WeakSet(), filterBeforeSignature = '', filterSearchClicked = false;
     const elapsed = () => Date.now() - startedAt;
     const announce = (message, error = false) => { try { onStatus?.(message, error); } catch {} };
@@ -79,9 +124,12 @@
     function fail(message) { stopped = true; clearInterval(timer); announce(message, true); return false; }
     function done(message) { stopped = true; clearInterval(timer); announce(message, false); return true; }
     function routeToJobs() {
-      if (!win.location.href.startsWith(INPUT_JOBS_URL.split('#')[0])) return fail('Recovery stopped: this bookmark only works on the GSRS production site.');
-      const target = new URL(INPUT_JOBS_URL);
-      if (win.location.hash !== target.hash) { stage = 'jobs'; win.location.hash = target.hash; startedAt = Date.now(); announce('Opening Input MM Jobs…'); return; }
+      const target = inputJobsUrl(win.location.href);
+      if (!target) return fail('Recovery needs an HTTPS GSRS address whose host starts with “gsrs-”. Open Picker from the GSRS Manual Match screen.');
+      context.sourceUrl = win.location.href;
+      context.targetUrl = target.href;
+      publishContext();
+      if (win.location.hash !== INPUT_JOBS_ROUTE) { stage = 'jobs'; win.location.hash = INPUT_JOBS_ROUTE; startedAt = Date.now(); announce('Opening Input MM Jobs…'); return; }
       stage = 'batch-search'; startedAt = Date.now();
     }
     function findTableByHeaders(required, scope = doc) {
@@ -128,8 +176,12 @@
       if (stopped) return;
       try {
         if (stage === 'start') {
+          refreshContext();
           if (!context.batchId) return fail('Recovery could not find a Batch ID from when Picker launched. Reopen Picker on the Manual Match screen and try again.');
-          if (!context.filterCaptured) return fail('Recovery could not read the Match Filter setting from when Picker launched. Reopen Picker on the Manual Match screen and try again.');
+          if (!context.filterCaptured) {
+            if (elapsed() < 15000) { announce(`Waiting for the Manual Match settings to load… Batch ID: ${context.batchId}; Match Filter: not captured yet.`); return; }
+            return fail(`Recovery could not read the Match Filter setting. Batch ID: ${context.batchId}; Match Filter: not captured. Reopen Picker after the Manual Match screen has finished loading.`);
+          }
           routeToJobs(); return;
         }
         if (elapsed() > 120000) return fail('GSRS took too long to respond. Wait for the page to finish, then start recovery again.');
@@ -260,11 +312,13 @@
       if (stopped) { stage = 'start'; stopped = false; }
       onStatus = statusCallback;
       startedAt = Date.now();
+      refreshContext();
       timer = win.setInterval(tick, 400);
       tick();
       return { cancel() { stopped = true; win.clearInterval(timer); } };
     }
-    return { context, recover };
+    function dispose() { if (captureInterval) win.clearInterval(captureInterval); captureInterval = 0; contextListeners.clear(); }
+    return { context, recover, subscribe, refreshContext, dispose };
   }
   root.PickerBookmarkRecovery = { create, capture };
 })(typeof globalThis !== 'undefined' ? globalThis : this);
