@@ -12,7 +12,7 @@
       }});
       store = root.PickerBookmarkStore.create({ status:'ready',results:[],observations:[] },{onError:lifecycle.reportError});
       controller = root.PickerBookmarkController.create({ document, window, store, lifecycle });
-      const recovery = root.PickerBookmarkRecovery.create({ document, window });
+      const recovery = root.PickerBookmarkRecovery?.create({ document, window }) || null;
       controller.scan();
       let bot;
       instance = { open(){ controller.refresh(); bot.open(); }, kill(options){ bot.destroy(options); } };

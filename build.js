@@ -55,6 +55,11 @@ fs.writeFileSync(path.join(root, 'gsrs-visuals-bookmark.html'), `<!DOCTYPE NETSC
 
 // Picker has a separate import and identity from GSRS Visuals.
 const pickerIcon = 'data:image/png;base64,' + fs.readFileSync(path.join(root, 'assets/picker-logo.png')).toString('base64');
+fs.writeFileSync(path.join(root, 'picker-bookmark.html'), `<!DOCTYPE NETSCAPE-Bookmark-file-1>
+<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">
+<TITLE>Picker Bookmark</TITLE><H1>Picker Bookmark</H1>
+<DL><p><DT><A HREF="${escapeAttr(bookmarkUrl)}" ICON="${pickerIcon}">Picker Bookmark v1</A></DL><p>
+`);
 fs.writeFileSync(path.join(root, 'picker-recovery-bookmark.html'), `<!DOCTYPE NETSCAPE-Bookmark-file-1>
 <META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">
 <TITLE>Picker Recovery Bookmark</TITLE><H1>Picker Recovery Bookmark</H1>
